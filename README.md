@@ -37,7 +37,7 @@ Code: `src/game/furniture.ts` (layout generator), `src/render/hall.ts` (scene pa
 
 ![hall](docs/screens/hall-monday.png)
 
-## Screens, settings and responsive layout
+## Screens, settings and responsive layouts
 
 | Screen | What it does |
 |---|---|
