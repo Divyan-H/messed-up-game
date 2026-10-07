@@ -271,9 +271,9 @@ body {
 
 /* On-screen pad: inverted-T arrows in a grid, sized from the viewport so it fits any phone. */
 .dpad {
-  --pad: clamp(42px, 10.5vmin, 70px);
+  --pad: clamp(58px, 20vmin, 92px);
   display: none; flex: none; margin: 2px auto 0;
-  grid-template-columns: repeat(3, var(--pad)); grid-template-rows: repeat(2, var(--pad)); gap: 4px;
+  grid-template-columns: repeat(3, var(--pad)); grid-template-rows: repeat(2, var(--pad)); gap: calc(var(--pad) * 0.16);
   touch-action: none;
 }
 .pad { width: 100%; height: 100%; position: relative; background: #7a4a24; border: 3px solid; border-color: var(--wood-hi) var(--wood-lo) var(--wood-lo) var(--wood-hi); touch-action: none; padding: 0; }
@@ -471,3 +471,6 @@ html, body { overflow: hidden; }
 }
 .x-close:active { transform: translate(1px, 1px); }
 .panel.intro .btn { margin-top: 8px; }
+
+/* side-by-side layout: the pad lives in a fixed-width column, so size it to that column */
+#app[data-layout='wide'] .dpad { --pad: clamp(46px, calc(230px * var(--ui) / 3.5), 84px); }
