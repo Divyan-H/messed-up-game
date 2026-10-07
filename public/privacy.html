@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MESSED UP - Privacy</title>
+    <style>
+      body { margin: 0; background: #150b06; color: #f3e8cf; font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      main { max-width: 720px; margin: 0 auto; padding: 32px 16px 48px; }
+      h1 { color: #ffc857; font-size: 28px; margin: 0 0 4px; }
+      h2 { color: #ffc857; font-size: 19px; margin: 28px 0 6px; }
+      a { color: #7fd0e0; }
+      p, li { color: #e6dcc3; }
+      .dim { color: #bfae8c; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Privacy</h1>
+      <p class="dim">MESSED UP - last updated 7 October 2026</p>
+
+      <h2>Playing without an account</h2>
+      <p>Practice mode needs no sign-in. Your settings, practice best score and achievements are saved only in your own browser (local storage) and are never sent to us.</p>
+
+      <h2>Signing in with Google</h2>
+      <p>Signing in is only needed for the ranked Daily Run, streaks and the leaderboard. When you sign in, Google tells us a numeric account identifier. We do <strong>not</strong> receive or store your email address, real name or photo.</p>
+      <p>We store, linked to that identifier:</p>
+      <ul>
+        <li>your nickname (shown on the leaderboard; you choose it and can change it),</li>
+        <li>your Daily Run results: date, difficulty, verified score and courses cleared,</li>
+        <li>your streak and best score.</li>
+      </ul>
+      <p>To check a score, the game sends the moves you made during the run; the server replays them and keeps only the resulting score.</p>
+
+      <h2>Cookies</h2>
+      <p>One cookie, <code>mu_s</code>, keeps you signed in for up to 30 days. It is not used for tracking. Google's sign-in button may set its own cookies, covered by <a href="https://policies.google.com/privacy" rel="noopener">Google's privacy policy</a>.</p>
+
+      <h2>Who processes the data</h2>
+      <p>The game is hosted on <a href="https://vercel.com/legal/privacy-policy" rel="noopener">Vercel</a>; account and leaderboard data is stored in <a href="https://upstash.com/trust/privacy.pdf" rel="noopener">Upstash</a> Redis. There are no ads and no analytics trackers.</p>
+
+      <h2>Deleting your data</h2>
+      <p>To have your account and scores removed, open an issue on the <a href="https://github.com/Divyan-H/messed-up-game/issues" rel="noopener">project's GitHub page</a> with your nickname. Daily leaderboards are deleted automatically after 8 days.</p>
+
+      <p><a href="/">Back to the game</a></p>
+    </main>
+  </body>
+</html>

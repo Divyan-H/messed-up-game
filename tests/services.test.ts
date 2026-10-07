@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { FallbackLeaderboard, LocalLeaderboard, type LeaderboardProvider, type ScoreEntry } from '../src/services/leaderboard';
-import { sanitizeName } from '../src/services/profile';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Account, type MeResponse } from '../src/services/account';
+import { nicknameProblem, randomNickname } from '../src/services/nickname';
 import { displayStreak, emptyStreak, recordDailyPlay, streakStatus } from '../src/services/streak';
 
 describe('streaks', () => {
@@ -35,39 +35,59 @@ describe('streaks', () => {
   });
 });
 
-describe('names', () => {
-  it('sanitises to the server-accepted character set and length', () => {
-    expect(sanitizeName('  <b>Sam!!bar</b> ')).toBe('bSambarb');
-    expect(sanitizeName('x'.repeat(30)).length).toBe(12);
+describe('nicknames', () => {
+  it('accepts 3-14 letters, numbers, _ and -', () => {
+    expect(nicknameProblem('MessKing')).toBeNull();
+    expect(nicknameProblem('ab')).not.toBeNull();
+    expect(nicknameProblem('has space')).not.toBeNull();
+    expect(nicknameProblem('x'.repeat(15))).not.toBeNull();
+  });
+  it('generates valid random names', () => {
+    for (let i = 0; i < 200; i++) expect(nicknameProblem(randomNickname())).toBeNull();
   });
 });
 
-describe('leaderboards', () => {
-  beforeEach(() => {
-    // fresh in-memory storage per test
-    (globalThis as unknown as { localStorage?: Storage }).localStorage = undefined;
-  });
-  const e = (name: string, score: number, date = '2026-10-07', streak = 1): ScoreEntry => ({ name, score, stages: 1, streak, date });
+describe('account (client side of ranked play)', () => {
+  const me = (over: Partial<MeResponse> = {}): MeResponse => ({ serverNow: Date.UTC(2026, 9, 7, 6), today: '2026-10-07', weekday: 3, user: { name: 'Ana', best: 0, streak: { current: 1, best: 1, freezes: 0, status: 'played-today' }, days: [], today: null }, ...over });
+  const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const payload = { attemptId: 'att1', ticks: 100, log: { dirs: [], perks: [] } };
+  afterEach(() => vi.unstubAllGlobals());
 
-  it('local board ranks best score per player and filters by day', async () => {
-    const lb = new LocalLeaderboard();
-    await lb.submit(e('Ana', 100));
-    await lb.submit(e('Ana', 300));
-    await lb.submit(e('Bob', 200));
-    await lb.submit(e('Old', 999, '2026-10-01'));
-    const daily = await lb.top('daily', '2026-10-07', 10);
-    expect(daily.map((r) => r.name)).toEqual(['Ana', 'Bob']);
-    expect(daily[0]!.score).toBe(300);
-    expect((await lb.top('alltime', '2026-10-07', 10))[0]!.name).toBe('Old');
+  it('goes offline (not an error screen) when the API has no database yet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(503, { error: 'not_configured' })));
+    const a = new Account();
+    await a.load();
+    expect(a.state).toBe('offline');
+    expect(a.offline).toBe('not_configured');
   });
 
-  it('falls back to the local board when the remote fails', async () => {
-    const broken: LeaderboardProvider = { submit: async () => { throw new Error('down'); }, top: async () => { throw new Error('down'); } };
-    const local = new LocalLeaderboard();
-    const lb = new FallbackLeaderboard(broken, local);
-    await lb.submit(e('Cy', 50, '2026-11-01'));
-    const rows = await lb.top('daily', '2026-11-01', 5);
-    expect(rows[0]!.name).toBe('Cy');
-    expect(lb.source).toBe('device');
+  it('uses the server clock for the game day, whatever the device clock says', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(200, me())));
+    const a = new Account();
+    await a.load();
+    expect(a.today()).toBe('2026-10-07');
+    expect(Math.abs(a.now() - Date.UTC(2026, 9, 7, 6))).toBeLessThan(5000);
+  });
+
+  it('keeps a run that could not be submitted and sends it on the next visit', async () => {
+    const a = new Account();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+    await expect(a.finishDaily(payload)).rejects.toThrow();
+    expect(a.hasPending()).toBe(true);
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url);
+      return url.includes('finish') ? reply(200, { score: 10, stages: 0, rank: 1, best: 10, date: '2026-10-07' }) : reply(200, me());
+    }));
+    await a.load();
+    expect(calls).toContain('/api/daily/finish');
+    expect(a.hasPending()).toBe(false);
+  });
+
+  it('drops a pending run the server has rejected for good', async () => {
+    const a = new Account();
+    vi.stubGlobal('fetch', vi.fn(async () => reply(409, { error: 'no_attempt' })));
+    await expect(a.finishDaily(payload)).rejects.toThrow();
+    expect(a.hasPending()).toBe(false);
   });
 });

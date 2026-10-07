@@ -27,7 +27,7 @@ export function howToScreen(app: App): Screen {
         label: 'SCORING',
         nodes: [
           card('POINTS', h('p', {}, 'Dish +10. Eat fast to build a combo (up to x5). Outside Maggi scares every enemy: eat them for 200, 400, 800... Bonus snack +100. Clearing a level gives time and stomach bonuses.')),
-          card('DAILY RUN AND STREAKS', h('p', {}, 'One ranked Daily Run per day (resets at midnight IST). Everyone gets the same mazes. Play every day to build a streak; every 7 days earns a Streak Freeze that forgives one missed day.')),
+          card('DAILY RUN AND STREAKS', h('p', {}, 'Sign in with Google for one ranked Daily Run per day (resets at midnight IST). Everyone gets the same secret mazes, and the server replays your moves to verify every score. Play every day to build a streak; every 7 days earns a Streak Freeze that forgives one missed day. Practice needs no sign-in.')),
         ],
       },
       {

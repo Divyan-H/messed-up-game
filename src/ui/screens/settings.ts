@@ -55,7 +55,7 @@ export function settingsScreen(app: App): Screen {
       h('div', { class: 'set-label' }, h('b', {}, 'DIFFICULTY'), h('span', { class: 'dim' }, 'Applies to Daily and Practice. Your final score is multiplied, so ranks stay fair.')),
       levelPicker(app),
       row('ADAPTIVE AI', 'Practice only: the game tunes enemy speed to how you play.', sw('adaptive')),
-      row('SHOW ENEMY PATHS', 'Draw each enemy\'s A* route on the maze.', sw('showPaths')),
+      row('SHOW ENEMY PATHS', 'Practice only: draw each enemy\'s A* route. In the Daily Run only the Hostel Hack perk shows them.', sw('showPaths')),
       row('HINT TICKER', 'Funny one-liners under the maze.', sw('tips')),
       row('MENU CARD BEFORE PLAY', 'Show today\'s dishes before each run.', sw('menuPreview')),
     )] },

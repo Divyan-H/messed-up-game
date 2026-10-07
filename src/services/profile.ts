@@ -1,15 +1,9 @@
-/** Everything the game remembers about the player on this device (no account needed). */
+/**
+ * What the game remembers on this device: settings, Practice stats and achievements. No account needed.
+ * Ranked data (nickname, streak, Daily results) lives on the server; see services/account.ts.
+ */
 import { loadJson, saveJson } from '../core/storage';
 import { asLevel, type Level } from '../game/difficulty';
-import { emptyStreak, type StreakState } from './streak';
-
-export interface DailyRecord {
-  date: string;
-  score: number;
-  stages: number;
-  weekday: number;
-  level?: Level;
-}
 
 export type TextSize = 'small' | 'medium' | 'large';
 export type ScaleMode = 'auto' | 'fill' | 'crisp';
@@ -96,13 +90,9 @@ export function sanitizeSettings(raw: unknown): Settings {
 
 export interface Profile {
   v: 1;
-  nickname: string;
-  streak: StreakState;
-  bestScore: number;
   practiceBest: number;
   runs: number;
   totalFood: number;
-  daily: Record<string, DailyRecord>;
   skill: number;
   achievements: string[];
   settings: Settings;
@@ -112,27 +102,14 @@ export interface Profile {
 
 const KEY = 'messedup:profile:v1';
 
-const ADJ = ['Spicy', 'Sleepy', 'Soggy', 'Crispy', 'Hungry', 'Salty', 'Saucy', 'Lazy', 'Cranky', 'Sneaky'];
-const NOUN = ['Idli', 'Dosa', 'Egg', 'Rasam', 'Chai', 'Puff', 'Rice', 'Banana', 'Curd', 'Vada'];
-
-export function sanitizeName(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9_ -]/g, '').trim().slice(0, 12);
-}
-
-export function randomName(): string {
-  const r = (n: number) => Math.floor(Math.random() * n);
-  return sanitizeName(`${ADJ[r(ADJ.length)]}${NOUN[r(NOUN.length)]}${10 + r(90)}`);
-}
+/** Fields older versions kept on the device before ranked play moved to the server. */
+const LEGACY_KEYS = ['nickname', 'streak', 'bestScore', 'daily'];
 
 const defaults = (): Profile => ({
   v: 1,
-  nickname: '',
-  streak: emptyStreak(),
-  bestScore: 0,
   practiceBest: 0,
   runs: 0,
   totalFood: 0,
-  daily: {},
   skill: 0.5,
   achievements: [],
   settings: { ...DEFAULT_SETTINGS },
@@ -143,27 +120,32 @@ export class ProfileStore {
   private data: Profile;
 
   constructor() {
+    this.data = ProfileStore.load();
+    // another tab saved: pick up its changes so this tab never writes stale data back over them
+    globalThis.addEventListener?.('storage', (e: StorageEvent) => {
+      if (e.key === KEY) this.data = ProfileStore.load();
+    });
+  }
+
+  private static load(): Profile {
     const loaded = loadJson<Profile>(KEY, defaults());
-    this.data = { ...defaults(), ...loaded, settings: sanitizeSettings(loaded.settings) };
-    if (!this.data.nickname) {
-      this.data.nickname = randomName();
-      this.save();
-    }
+    const p = { ...defaults(), ...loaded, settings: sanitizeSettings(loaded.settings) };
+    for (const k of LEGACY_KEYS) delete (p as unknown as Record<string, unknown>)[k];
+    return p;
   }
 
   get(): Readonly<Profile> {
     return this.data;
   }
 
+  /** Read-modify-write against the latest saved copy, so two open tabs do not overwrite each other. */
   update(fn: (p: Profile) => void): void {
+    this.data = ProfileStore.load();
     fn(this.data);
     this.save();
   }
 
   private save(): void {
-    // keep the history bounded so localStorage never grows without limit
-    const keys = Object.keys(this.data.daily).sort();
-    for (const k of keys.slice(0, Math.max(0, keys.length - 60))) delete this.data.daily[k];
     saveJson(KEY, this.data);
   }
 }

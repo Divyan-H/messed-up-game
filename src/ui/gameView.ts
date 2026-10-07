@@ -18,6 +18,8 @@ import { createSurface } from '../render/canvas';
 import { Effects } from '../render/effects';
 import { FOOD_VIEW } from '../render/foodSprites';
 import { HEADER_H, Renderer, VIEW_H, VIEW_W } from '../render/renderer';
+import { ApiError } from '../services/api';
+import type { DailyFinish } from '../services/account';
 import type { App, Screen } from './app';
 import { button, clear, fmt, h, spriteImg } from './dom';
 import { InputController } from './input';
@@ -26,10 +28,15 @@ import { runTour, type TourHandle } from './tour';
 
 const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
 
-/** `?autopilot` lets the bot play (great for demos); `?sim=4` runs the simulation faster (for testing). */
+/**
+ * `?autopilot` lets the bot play and `?sim=4` runs the simulation faster. Both only work in Practice:
+ * the ranked Daily Run always takes human input at real-time speed.
+ */
 const QUERY = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
-const AUTOPILOT = QUERY.has('autopilot');
-const SIM_SPEED = Math.min(8, Math.max(1, Number(QUERY.get('sim') ?? 1) || 1));
+const AUTOPILOT_QUERY = QUERY.has('autopilot');
+const SIM_QUERY = Math.min(8, Math.max(1, Number(QUERY.get('sim') ?? 1) || 1));
+/** Longest frame gap the simulation catches up on. Anything longer is dropped, so a slowed-down device cannot play in slow motion. */
+const MAX_FRAME_SECONDS = 0.25;
 
 export class GameView {
   private readonly run: Run;
@@ -55,6 +62,10 @@ export class GameView {
   private unlocked: string[] = [];
   private bot = new Bot();
   private readonly level: Level;
+  private readonly autopilot: boolean;
+  /** Server verification of a finished Daily Run (null in Practice). */
+  private submission: Promise<DailyFinish> | null = null;
+  private readonly simSpeed: number;
 
   // DOM
   private readonly hearts = h('div', { class: 'hearts' });
@@ -76,8 +87,15 @@ export class GameView {
   // HUD cache (only touch the DOM when a value changes)
   private hud = { score: -1, stomachs: -1, left: -1, combo: '', day: '' };
 
-  constructor(private readonly app: App, private readonly cfg: RunConfig) {
+  constructor(
+    private readonly app: App,
+    private readonly cfg: RunConfig,
+    /** Present for the ranked Daily Run: the attempt the server opened for this run. */
+    private readonly daily: { attemptId: string } | null = null,
+  ) {
     this.level = cfg.level ?? 'normal';
+    this.autopilot = AUTOPILOT_QUERY && cfg.mode === 'practice';
+    this.simSpeed = cfg.mode === 'practice' ? SIM_QUERY : 1;
     this.run = new Run(cfg);
     const ctx = this.canvas.getContext('2d')!;
     this.renderer = new Renderer(ctx);
@@ -123,10 +141,17 @@ export class GameView {
       if (document.hidden && this.run.phase === 'playing' && !this.paused) this.togglePause(true);
     };
     document.addEventListener('visibilitychange', vis);
+    // Closing or reloading mid-Daily: warn first, and if the player leaves anyway send what was played.
     const hide = () => {
-      if (this.cfg.mode === 'daily' && this.run.tickCount > 0) this.finalize();
+      if (this.daily && !this.finalized && this.run.tickCount > 0) this.finalize(true);
+    };
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!this.daily || this.finalized) return;
+      e.preventDefault();
+      e.returnValue = '';
     };
     window.addEventListener('pagehide', hide);
+    window.addEventListener('beforeunload', warn);
     const introKey = (e: KeyboardEvent) => {
       if (!this.introOpen || this.tourOpen || !['Enter', 'Space', 'Escape'].includes(e.code)) return;
       e.preventDefault();
@@ -138,6 +163,7 @@ export class GameView {
       window.removeEventListener('keydown', introKey, true);
       document.removeEventListener('visibilitychange', vis);
       window.removeEventListener('pagehide', hide);
+      window.removeEventListener('beforeunload', warn);
     });
 
     this.syncStage();
@@ -167,25 +193,31 @@ export class GameView {
 
   private readonly frame = (ms: number): void => {
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min(0.1, (ms - this.last) / 1000);
+    const dt = Math.min(MAX_FRAME_SECONDS, (ms - this.last) / 1000);
     this.last = ms;
     if (!this.paused && !this.tourOpen && !this.introOpen) {
-      this.acc += dt * SIM_SPEED;
+      this.acc += dt * this.simSpeed;
       let steps = 0;
-      while (this.acc >= DT && steps++ < 6 * SIM_SPEED) {
-        if (AUTOPILOT && this.run.phase === 'perk') this.pickPerk(0);
-        this.run.tick(AUTOPILOT && this.run.phase === 'playing' ? this.bot.decide(this.run.stage) : this.input.code);
+      const maxSteps = Math.ceil(MAX_FRAME_SECONDS / DT) * this.simSpeed;
+      while (this.acc >= DT && steps++ < maxSteps) {
+        if (this.autopilot && this.run.phase === 'perk') this.pickPerk(0);
+        this.run.tick(this.autopilot && this.run.phase === 'playing' ? this.bot.decide(this.run.stage) : this.input.code);
         this.acc -= DT;
       }
-      if (steps >= 6 * SIM_SPEED) this.acc = 0;
+      if (steps >= maxSteps) this.acc = 0;
       this.fx.update(dt);
     }
     this.consume();
     this.syncStage();
-    this.renderer.draw(this.run.stage, this.fx, { anim: ms / 1000, showPaths: this.app.settings.showPaths || this.run.mods.showPaths });
+    this.renderer.draw(this.run.stage, this.fx, { anim: ms / 1000, showPaths: this.pathsVisible() });
     this.updateHud();
     if (this.app.settings.showFps) this.updateFps(ms);
   };
+
+  /** Enemy route overlay: a free setting in Practice; in the ranked Daily Run only the Hostel Hack perk shows it. */
+  private pathsVisible(): boolean {
+    return this.run.mods.showPaths || (this.cfg.mode === 'practice' && this.app.settings.showPaths);
+  }
 
   private updateFps(ms: number): void {
     this.fpsFrames++;
@@ -421,7 +453,7 @@ export class GameView {
     const theme = THEMES[this.cfg.weekday]!;
     const items = uniqueItems(mealItems(MENUS[this.cfg.weekday]!, course));
     const roster = this.run.stage.params.difficulty.roster;
-    this.introOpen = !AUTOPILOT;
+    this.introOpen = !this.autopilot;
     this.input.reset();
     this.showOverlay(h('div', { class: 'panel intro' },
       h('button', { class: 'x-close', type: 'button', 'aria-label': 'Close', onclick: () => this.dismissIntro() }, 'X'),
@@ -491,7 +523,9 @@ export class GameView {
       button('HOW TO PLAY (TOUR)', () => this.maybeTour(true)),
       button(s.sound ? 'SOUND: ON' : 'SOUND: OFF', () => { this.app.toggleSetting('sound'); this.togglePause(true); }),
       button(s.crt ? 'SCANLINES: ON' : 'SCANLINES: OFF', () => { this.app.toggleSetting('crt'); this.togglePause(true); }),
-      button(s.showPaths ? 'ENEMY PATHS: ON' : 'ENEMY PATHS: OFF', () => { this.app.toggleSetting('showPaths'); this.togglePause(true); }),
+      this.cfg.mode === 'practice'
+        ? button(s.showPaths ? 'ENEMY PATHS: ON' : 'ENEMY PATHS: OFF', () => { this.app.toggleSetting('showPaths'); this.togglePause(true); })
+        : null,
       button(this.cfg.mode === 'daily' ? 'QUIT (counts as your daily run)' : 'QUIT', () => {
         this.finalize();
         this.app.goTitle();
@@ -501,12 +535,12 @@ export class GameView {
 
   // ---------------------------------------------------------------- run end
 
-  /** Raw score times the difficulty multiplier (easy x0.75, hard x1.5), so ranks are comparable across levels. */
+  /** Raw score times the difficulty multiplier, so ranks are comparable across levels. The server recomputes this by replay. */
   private finalScore(): number {
     return Math.round(this.run.totalScore * LEVELS[this.level].score);
   }
 
-  private finalize(): void {
+  private finalize(exiting = false): void {
     if (this.finalized) return;
     this.finalized = true;
     const run = this.run;
@@ -516,10 +550,7 @@ export class GameView {
     this.app.profile.update((p) => {
       p.runs++;
       p.totalFood += run.totals.food;
-      if (cfg.mode === 'daily') {
-        p.daily[cfg.dateKey] = { date: cfg.dateKey, score, stages: run.stagesCleared, weekday: cfg.weekday, level: this.level };
-        p.bestScore = Math.max(p.bestScore, score);
-      } else {
+      if (cfg.mode === 'practice') {
         p.practiceBest = Math.max(p.practiceBest, score);
         const sm = new SkillModel(p.skill);
         run.outcomes.forEach((o) => sm.record(o));
@@ -530,24 +561,29 @@ export class GameView {
       earn('immunity', run.phase === 'complete');
       earn('maggi', run.totals.enemies >= 4);
       earn('untouched', run.phase === 'complete' && run.totals.lives === 0);
+      const streak = this.app.account.user?.streak.current ?? 0;
       if (cfg.mode === 'daily') {
-        earn('streak3', p.streak.current >= 3);
-        earn('streak7', p.streak.current >= 7);
+        earn('streak3', streak >= 3);
+        earn('streak7', streak >= 7);
       }
     });
     this.unlocked = this.app.profile.get().achievements.filter((a) => !before.has(a));
-    if (cfg.mode === 'daily') {
-      const p = this.app.profile.get();
-      void this.app.board.submit({ name: p.nickname, score, stages: run.stagesCleared, streak: p.streak.current, date: cfg.dateKey });
+    if (this.daily) {
+      const payload = { attemptId: this.daily.attemptId, ticks: run.tickCount, log: run.log };
+      if (exiting) this.app.account.finishOnExit(payload);
+      else {
+        this.submission = this.app.account.finishDaily(payload);
+        this.submission.catch(() => undefined); // the end screen reports failures
+      }
     }
   }
 
   private shareText(): string {
     const run = this.run;
-    const p = this.app.profile.get();
+    const streak = this.app.account.user?.streak.current ?? 0;
     const courses = [0, 1, 2].map((i) => (run.outcomes[i]?.cleared ? ['🍳', '🍛', '🌙'][i] : '💀')).join('');
     const d = new Date(`${this.cfg.dateKey}T00:00:00Z`).toUTCString().slice(5, 11);
-    return [`MESSED UP - ${this.cfg.mode === 'daily' ? d : 'practice'}${this.level === 'normal' ? '' : ` (${LEVELS[this.level].label})`}`, `${fmt(this.finalScore())} pts ${courses}`, this.cfg.mode === 'daily' ? `🔥 ${p.streak.current} day streak` : '', location.origin]
+    return [`MESSED UP - ${this.cfg.mode === 'daily' ? d : 'practice'}${this.level === 'normal' ? '' : ` (${LEVELS[this.level].label})`}`, `${fmt(this.finalScore())} pts ${courses}`, this.cfg.mode === 'daily' ? `🔥 ${streak} day streak` : '', location.origin]
       .filter(Boolean)
       .join('\n');
   }
@@ -557,14 +593,27 @@ export class GameView {
     const p = this.app.profile.get();
     const won = run.phase === 'complete';
     const rank = h('p', { class: 'hint' });
-    const countdown = h('span', { class: 'mono' }, formatCountdown(msUntilNextIstMidnight(Date.now())));
+    const countdown = h('span', { class: 'mono' }, formatCountdown(msUntilNextIstMidnight(this.app.account.now())));
     const copied = h('p', { class: 'hint' });
+    const finalEl = h('div', { class: 'final' }, fmt(this.finalScore()));
+    const streak = this.app.account.user?.streak.current ?? 0;
 
-    if (this.cfg.mode === 'daily') {
-      void this.app.board.top('daily', this.cfg.dateKey, 50).then((rows) => {
-        const i = rows.findIndex((r) => r.name === p.nickname);
-        rank.textContent = i >= 0 ? `RANK #${i + 1} TODAY (${this.app.board.source === 'online' ? 'community' : 'this device'})` : '';
-      });
+    if (this.submission) {
+      rank.textContent = 'VERIFYING SCORE...';
+      this.submission.then(
+        (res) => {
+          finalEl.textContent = fmt(res.score);
+          rank.textContent = `VERIFIED - RANK #${res.rank} TODAY`;
+          rank.className = 'hint good';
+        },
+        (e: unknown) => {
+          const offline = !(e instanceof ApiError) || e.status === 0 || e.status >= 500;
+          rank.textContent = offline
+            ? 'Saved on this device. It will be submitted next time you open the game.'
+            : `This run could not be verified (${(e as ApiError).code}).`;
+          rank.className = 'hint bad';
+        },
+      );
     }
 
     const badges = this.unlocked.map((id) => ACHIEVEMENTS.find((a) => a.id === id)).filter(Boolean)
@@ -572,11 +621,11 @@ export class GameView {
 
     this.showOverlay(h('div', { class: 'panel end' },
       h('h2', { class: `big ${won ? 'good' : 'bad'}` }, won ? `YOU SURVIVED ${WEEKDAY_NAMES[this.cfg.weekday]!.toUpperCase()}!` : pick(DEATH_LINES).toUpperCase()),
-      h('div', { class: 'final' }, fmt(this.finalScore())),
+      finalEl,
       this.level === 'normal' ? null : h('p', { class: 'hint' }, `${fmt(run.totalScore)} base x ${LEVELS[this.level].score} (${LEVELS[this.level].label})`),
       h('p', { class: 'hint' }, `${run.stagesCleared}/3 courses - ${run.totals.food} dishes - best combo ${run.totals.maxCombo}`),
       this.cfg.mode === 'daily'
-        ? h('p', { class: 'hint' }, `${p.streak.current} day streak. Next menu in `, countdown)
+        ? h('p', { class: 'hint' }, `${streak} day streak. Next menu in `, countdown)
         : h('p', { class: 'hint' }, `Practice best ${fmt(p.practiceBest)}`),
       rank, ...badges,
       button('SHARE', async () => {

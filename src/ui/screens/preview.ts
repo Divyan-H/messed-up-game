@@ -7,13 +7,15 @@ import { MENUS, mealItems, uniqueItems, type MenuItem } from '../../game/menu';
 import { ENEMY_SPRITE, sprite, type SpriteName } from '../../render/art';
 import { FOOD_VIEW } from '../../render/foodSprites';
 import type { App, Screen } from '../app';
+import { ApiError } from '../../services/api';
 import { button, h, spriteImg } from '../dom';
 import { levelPicker, paneSet } from '../widgets';
 
 export interface PreviewOptions {
   weekday: number;
   mode: 'daily' | 'practice';
-  onStart: () => void;
+  /** May be async (the Daily Run asks the server first); a rejection is shown on this screen. */
+  onStart: () => void | Promise<void>;
 }
 
 const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
@@ -53,10 +55,33 @@ export function previewScreen(app: App, o: PreviewOptions): Screen {
   };
   paintRoster();
 
-  const start = () => {
+  const startLabel = o.mode === 'daily' ? 'START DAILY RUN' : 'START PRACTICE';
+  const startBtn = button(startLabel, () => void start(), 'primary big');
+  const startError = h('p', { class: 'hint bad' });
+  let starting = false;
+  const START_ERRORS: Record<string, string> = {
+    already_played: "You have already played today's Daily Run. Come back tomorrow!",
+    signed_out: 'Your sign-in expired. Go back and sign in again.',
+    banned: 'This account cannot play ranked runs.',
+    not_configured: 'Ranked play is offline right now. Practice still works.',
+  };
+  const start = async () => {
+    if (starting) return;
+    starting = true;
+    startBtn.disabled = true;
+    startBtn.textContent = 'STARTING...';
+    startError.textContent = '';
     sfx.unlock();
-    sfx.start();
-    o.onStart();
+    try {
+      await o.onStart();
+      sfx.start();
+    } catch (e) {
+      const code = e instanceof ApiError ? e.code : 'network';
+      startError.textContent = START_ERRORS[code] ?? 'Could not reach the server. Check your connection and try again.';
+      startBtn.disabled = false;
+      startBtn.textContent = startLabel;
+      starting = false;
+    }
   };
   const back = () => {
     sfx.click();
@@ -67,7 +92,7 @@ export function previewScreen(app: App, o: PreviewOptions): Screen {
   const onKey = (e: KeyboardEvent) => {
     if (e.code === 'Enter') {
       e.preventDefault();
-      start();
+      void start();
     } else if (e.code === 'Escape') back();
   };
   window.addEventListener('keydown', onKey);
@@ -101,16 +126,14 @@ export function previewScreen(app: App, o: PreviewOptions): Screen {
       },
     ]),
     quip,
-    h('div', { class: 'p-actions' },
-      button(o.mode === 'daily' ? 'START DAILY RUN' : 'START PRACTICE', start, 'primary big'),
-      button('BACK', back, 'ghost'),
-    ),
+    h('div', { class: 'p-actions' }, startBtn, button('BACK', back, 'ghost')),
+    startError,
     h('div', { class: 'p-foot' },
       o.mode === 'daily' ? h('span', { class: 'dim' }, 'Your one daily attempt begins when you press START.') : null,
       button('START & SKIP THIS SCREEN NEXT TIME', () => {
         app.setSetting('menuPreview', false);
         sfx.click();
-        start();
+        void start();
       }, 'small linkish'),
     ),
   );

@@ -9,6 +9,7 @@ const screen = document.getElementById('screen')!;
 const btns = document.getElementById('tb-btns')!;
 
 const app = new App(screen, shell);
+void app.account.load(); // the title screen re-draws when the account status arrives
 
 // title-bar toggles (retro "window buttons")
 const mk = (label: string, key: 'sound' | 'crt') => {

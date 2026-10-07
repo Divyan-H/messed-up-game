@@ -1,13 +1,10 @@
 /** Application shell: owns services, settings and simple screen navigation. */
-import { istDateKey, weekdayOf } from '../core/clock';
-import { hashString } from '../core/rng';
 import { sfx } from '../audio/sfx';
 import { THEMES } from '../game/config';
 import { SkillModel } from '../game/difficulty';
 import type { RunConfig } from '../game/run';
-import { FallbackLeaderboard, LocalLeaderboard, RemoteLeaderboard } from '../services/leaderboard';
+import { Account } from '../services/account';
 import { DEFAULT_SETTINGS, ProfileStore, type Settings } from '../services/profile';
-import { recordDailyPlay } from '../services/streak';
 import { clear, h } from './dom';
 import { GameView } from './gameView';
 import { aiLabScreen } from './screens/aiLab';
@@ -28,7 +25,8 @@ export interface Screen {
 
 export class App {
   readonly profile = new ProfileStore();
-  readonly board = new FallbackLeaderboard(new RemoteLeaderboard(), new LocalLeaderboard());
+  /** Google-signed-in player and the ranked Daily Run (server side). */
+  readonly account = new Account();
   private current: Screen | null = null;
   private readonly layout: LayoutController;
   private fitOff: (() => void) | null = null;
@@ -45,12 +43,14 @@ export class App {
     return this.profile.get().settings;
   }
 
+  /** Today's game day, from the server's clock once it is known. */
   today(): string {
-    return istDateKey(Date.now());
+    return this.account.today();
   }
 
+  /** True once today's ranked attempt has been used (on any device). */
   dailyDone(): boolean {
-    return !!this.profile.get().daily[this.today()];
+    return !!this.account.user?.today;
   }
 
   skillModel(): SkillModel {
@@ -111,26 +111,21 @@ export class App {
   goLab = (): void => this.show(aiLabScreen(this));
   goSettings = (): void => this.show(settingsScreen(this));
 
-  /** One ranked attempt per IST day. Shows the menu card first (unless switched off); the attempt is only consumed on START. */
+  /**
+   * The ranked Daily Run, for signed-in players: one attempt per day per account. The menu card shows first
+   * (unless switched off). Pressing START asks the server for the day's secret maze, which uses the attempt.
+   */
   startDaily(): void {
-    if (this.dailyDone()) return;
-    const weekday = weekdayOf(this.today());
+    if (!this.account.user || this.dailyDone()) return;
+    const weekday = this.account.weekday();
     if (this.settings.menuPreview) this.show(previewScreen(this, { weekday, mode: 'daily', onStart: () => this.beginDaily() }));
-    else this.beginDaily();
+    else void this.beginDaily().catch(() => this.goTitle());
   }
 
-  /** The attempt is consumed (and the streak counted) the moment the run starts. */
-  private beginDaily(): void {
-    const date = this.today();
-    if (this.dailyDone()) return;
-    const weekday = weekdayOf(date);
-    const level = this.settings.difficulty;
-    this.profile.update((p) => {
-      p.streak = recordDailyPlay(p.streak, date);
-      p.daily[date] = { date, score: 0, stages: 0, weekday, level };
-    });
-    const cfg: RunConfig = { mode: 'daily', seed: hashString(`messedup-${date}`), weekday, dateKey: date, adaptive: 1, level };
-    this.show(new GameView(this, cfg).screen());
+  private async beginDaily(): Promise<void> {
+    const r = await this.account.startDaily(this.settings.difficulty);
+    const cfg: RunConfig = { mode: 'daily', seed: r.seed, weekday: r.weekday, dateKey: r.date, adaptive: 1, level: r.level };
+    this.show(new GameView(this, cfg, { attemptId: r.attemptId }).screen());
   }
 
   startPractice(weekday: number, opts: { skipPreview?: boolean } = {}): void {

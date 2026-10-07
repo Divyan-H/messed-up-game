@@ -474,3 +474,11 @@ html, body { overflow: hidden; }
 
 /* side-by-side layout: the pad lives in a fixed-width column, so size it to that column */
 #app[data-layout='wide'] .dpad { --pad: clamp(46px, calc(230px * var(--ui) / 3.5), 84px); }
+
+/* ---------- Google sign-in and account ---------- */
+.gsi-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 2px 0 6px; }
+.gsi { min-height: 44px; display: flex; justify-content: center; }
+.acct { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 2px 0; font-size: calc(7px * var(--ui) * var(--fz)); }
+.acct .btn.linkish { width: auto; padding: 4px; margin: 0; }
+.legal { text-align: center; margin: 4px 0 0; font-size: calc(7px * var(--ui) * var(--fz)); }
+.legal a { color: var(--dim); }
