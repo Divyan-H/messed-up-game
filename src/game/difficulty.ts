@@ -15,6 +15,8 @@ export interface LevelDef {
   release: number;
   /** Multiplies how long the hunger bar lasts. */
   hunger: number;
+  /** Dishes added to (or removed from) each course. */
+  food: number;
   /** Seconds added to the Maggi power-up. */
   maggi: number;
   stomachs: number;
@@ -25,9 +27,9 @@ export interface LevelDef {
 }
 
 export const LEVELS: Record<Level, LevelDef> = {
-  easy: { label: 'EASY', blurb: 'Slower dishes, 4 stomachs, longer Maggi, no boss. Score x0.75.', speed: 0.72, release: 1.6, hunger: 1.3, maggi: 2, stomachs: 4, cap: 0.9, score: 0.75 },
-  normal: { label: 'NORMAL', blurb: 'The intended recipe. Score x1.', speed: 1, release: 1, hunger: 1, maggi: 0, stomachs: 3, cap: 0.9, score: 1 },
-  hard: { label: 'HARD', blurb: 'Faster dishes, quicker releases, shorter Maggi, hungrier you. Score x1.5.', speed: 1.08, release: 0.75, hunger: 0.8, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.5 },
+  easy: { label: 'EASY', blurb: 'Slower dishes, fewer dishes to eat, 4 stomachs, longer Maggi, no boss. Score x0.75.', speed: 0.72, release: 1.6, hunger: 1.3, food: -2, maggi: 2, stomachs: 4, cap: 0.9, score: 0.75 },
+  normal: { label: 'NORMAL', blurb: 'The intended recipe. Score x1.', speed: 1, release: 1, hunger: 1, food: 0, maggi: 0, stomachs: 3, cap: 0.9, score: 1 },
+  hard: { label: 'HARD', blurb: 'Faster dishes, more dishes to eat, quicker releases, shorter Maggi, hungrier you. Score x1.5.', speed: 1.08, release: 0.75, hunger: 0.8, food: 2, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.5 },
 };
 
 export const asLevel = (v: unknown): Level => (v === 'easy' || v === 'hard' ? v : 'normal');
@@ -59,10 +61,10 @@ export function stageDifficulty(weekday: number, course: number, adaptive = 1, l
     roster,
     enemySpeedRatio: Math.min(L.cap, base * adaptive * L.speed),
     releaseInterval: Math.max(1.2, (3.6 - 0.25 * tier - 0.2 * course) * L.release),
-    foodCount: 28 + course * 2 + Math.floor(tier / 2),
+    foodCount: 12 + course + Math.floor(tier / 2) + L.food,
     maggiSeconds: Math.max(3.5, 7 - 0.2 * tier + L.maggi),
     hungerSeconds: 100 * L.hunger,
-    parTime: 75 + course * 5,
+    parTime: 45 + course * 3,
   };
 }
 
