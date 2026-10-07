@@ -4,6 +4,7 @@ import { ACHIEVEMENTS } from '../../game/content';
 import type { BoardKind } from '../../services/leaderboard';
 import type { App, Screen } from '../app';
 import { button, clear, fmt, h } from '../dom';
+import { paneSet } from '../widgets';
 
 const TABS: Array<{ kind: BoardKind; label: string }> = [
   { kind: 'daily', label: 'TODAY' },
@@ -24,7 +25,7 @@ export function hallScreen(app: App): Screen {
   const render = async () => {
     clear(list);
     list.append(h('p', { class: 'hint' }, 'LOADING...'));
-    const rows = await app.board.top(tab, date, 15);
+    const rows = await app.board.top(tab, date, 10);
     if (!alive) return;
     clear(list);
     source.textContent = app.board.source === 'online' ? 'ONLINE - whole community' : 'THIS DEVICE ONLY - community board not connected';
@@ -65,21 +66,27 @@ export function hallScreen(app: App): Screen {
     h('div', { class: `badge ${unlocked.has(a.id) ? 'on' : ''}` }, h('b', {}, unlocked.has(a.id) ? a.name : '???'), h('span', {}, a.desc)),
   ));
 
-  const el = h('div', { class: 'page scroll' },
-    h('h2', { class: 'page-title' }, 'HALL OF FAME'),
-    tabBar, source, list,
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, 'YOUR STATS'),
-      h('div', { class: 'stats' },
-        h('div', {}, h('b', {}, fmt(profile.bestScore)), h('span', {}, 'BEST DAILY')),
-        h('div', {}, h('b', {}, String(profile.streak.best)), h('span', {}, 'BEST STREAK')),
-        h('div', {}, h('b', {}, String(profile.runs)), h('span', {}, 'RUNS')),
-        h('div', {}, h('b', {}, fmt(profile.totalFood)), h('span', {}, 'DISHES EATEN')),
-      ),
-    ),
-    h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'LAST 14 DAYS'), calendar),
-    h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'ACHIEVEMENTS'), badges),
-    button('BACK', () => { sfx.click(); app.goTitle(); }),
+  const el = h('div', { class: 'page' },
+    h('div', { class: 'page-head' }, h('h2', { class: 'page-title' }, 'HALL OF FAME'), button('BACK', () => { sfx.click(); app.goTitle(); }, 'ghost small')),
+    paneSet([
+      { label: 'BOARD', nodes: [h('div', { class: 'card' }, tabBar, source, list)] },
+      {
+        label: 'STATS',
+        nodes: [
+          h('div', { class: 'card' },
+            h('div', { class: 'card-title' }, 'YOUR STATS'),
+            h('div', { class: 'stats' },
+              h('div', {}, h('b', {}, fmt(profile.bestScore)), h('span', {}, 'BEST DAILY')),
+              h('div', {}, h('b', {}, String(profile.streak.best)), h('span', {}, 'BEST STREAK')),
+              h('div', {}, h('b', {}, String(profile.runs)), h('span', {}, 'RUNS')),
+              h('div', {}, h('b', {}, fmt(profile.totalFood)), h('span', {}, 'DISHES EATEN')),
+            ),
+          ),
+          h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'LAST 14 DAYS'), calendar),
+        ],
+      },
+      { label: 'BADGES', nodes: [h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'ACHIEVEMENTS'), badges)] },
+    ]),
   );
-  return { el, dispose: () => void (alive = false) };
+  return { el, fit: true, dispose: () => void (alive = false) };
 }

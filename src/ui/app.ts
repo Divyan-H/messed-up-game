@@ -8,7 +8,7 @@ import type { RunConfig } from '../game/run';
 import { FallbackLeaderboard, LocalLeaderboard, RemoteLeaderboard } from '../services/leaderboard';
 import { DEFAULT_SETTINGS, ProfileStore, type Settings } from '../services/profile';
 import { recordDailyPlay } from '../services/streak';
-import { clear } from './dom';
+import { clear, h } from './dom';
 import { GameView } from './gameView';
 import { aiLabScreen } from './screens/aiLab';
 import { hallScreen } from './screens/hall';
@@ -17,10 +17,12 @@ import { practiceScreen } from './screens/practice';
 import { previewScreen } from './screens/preview';
 import { settingsScreen } from './screens/settings';
 import { titleScreen } from './screens/title';
-import { LayoutController } from './layout';
+import { LayoutController, TEXT_SCALE, mountFit } from './layout';
 
 export interface Screen {
   el: HTMLElement;
+  /** Menu pages set this: the page is scaled to fit the viewport, so it never scrolls. The game view leaves it off. */
+  fit?: boolean;
   dispose?: () => void;
 }
 
@@ -29,6 +31,7 @@ export class App {
   readonly board = new FallbackLeaderboard(new RemoteLeaderboard(), new LocalLeaderboard());
   private current: Screen | null = null;
   private readonly layout: LayoutController;
+  private fitOff: (() => void) | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -67,6 +70,7 @@ export class App {
     sh.dataset.pad = s.pad;
     sh.dataset.padSide = s.padSide;
     this.layout.setTextSize(s.textSize);
+    window.dispatchEvent(new Event('resize'));
   }
 
   toggleSetting(key: { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings]): void {
@@ -86,9 +90,18 @@ export class App {
 
   show(screen: Screen): void {
     this.current?.dispose?.();
+    this.fitOff?.();
+    this.fitOff = null;
     this.current = screen;
     clear(this.root);
-    this.root.append(screen.el);
+    if (!screen.fit) {
+      this.root.append(screen.el);
+      return;
+    }
+    const inner = h('div', { class: 'fit-inner' }, screen.el);
+    const host = h('div', { class: 'fit-host' }, inner);
+    this.root.append(host);
+    this.fitOff = mountFit(host, inner, () => TEXT_SCALE[this.settings.textSize]);
   }
 
   goTitle = (): void => this.show(titleScreen(this));

@@ -61,3 +61,23 @@ export function levelPicker(app: App, onChange?: (l: Level) => void): HTMLElemen
   );
   return h('div', { class: 'level-picker' }, seg, blurb);
 }
+
+/**
+ * Groups cards into tabbed panes. On a narrow layout one pane shows at a time (all panes share one grid cell, so the
+ * page height never jumps between tabs); on a wide layout every card is shown at once in a grid. See `.paneset` in CSS.
+ */
+export function paneSet(tabs: ReadonlyArray<{ label: string; nodes: Array<Node | null> }>): HTMLElement {
+  const bar = h('div', { class: 'tabs panetabs' });
+  const panes = tabs.map((t, i) => h('div', { class: `pane ${i === 0 ? 'on' : ''}` }, ...t.nodes));
+  const buttons = tabs.map((t, i) => h('button', {
+    class: `tab ${i === 0 ? 'on' : ''}`,
+    type: 'button',
+    onclick: () => {
+      sfx.click();
+      buttons.forEach((b, j) => b.classList.toggle('on', i === j));
+      panes.forEach((p, j) => p.classList.toggle('on', i === j));
+    },
+  }, t.label));
+  bar.append(...buttons);
+  return h('div', { class: 'paneset' }, bar, h('div', { class: 'panes' }, ...panes));
+}

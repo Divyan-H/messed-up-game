@@ -14,6 +14,7 @@ import { benchmarkAlgorithms } from '../../game/pathfinding';
 import { replayRun, type RunConfig } from '../../game/run';
 import type { App, Screen } from '../app';
 import { button, clear, fmt, h } from '../dom';
+import { paneSet } from '../widgets';
 
 const ALGO_LABEL = { astar: 'A* (Manhattan)', dijkstra: 'Dijkstra', bfs: 'BFS' } as const;
 const nextFrame = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -88,23 +89,28 @@ export function aiLabScreen(app: App): Screen {
 
   const runBtn = button('RUN BOT PLAYTEST', () => void runBot(runBtn as HTMLButtonElement), 'small');
 
-  const el = h('div', { class: 'page scroll' },
-    h('h2', { class: 'page-title' }, 'AI LAB'),
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, 'ENEMY BRAINS'),
-      h('pre', { class: 'diagram' }, 'every enemy:  DEN > ACTIVE <> SCARED > EATEN > DEN\nWednesday Special while ACTIVE:\n  PATROL <> CHASE  (range 7, gives up at 10)'),
-      ...(['blob', 'curry', 'chapati', 'special'] as const).map((k) => h('p', { class: 'hint' }, h('b', {}, `${ENEMY_INFO[k].name}: `), ENEMY_INFO[k].blurb)),
-      toggle('SHOW ENEMY PATHS IN GAME', 'showPaths'),
-    ),
-    h('div', { class: 'card' }, h('div', { class: 'card-title' }, '1. PATHFINDING BENCHMARK'), button('RUN', runBench, 'small'), benchOut),
-    h('div', { class: 'card' }, h('div', { class: 'card-title' }, '2. BOT PLAYTESTER'), daySel, runBtn, botOut),
-    h('div', { class: 'card' }, h('div', { class: 'card-title' }, '3. DETERMINISM CHECK'), button('RECORD + REPLAY', runReplay, 'small'), replayOut),
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, '4. ADAPTIVE DIFFICULTY'),
-      h('p', { class: 'hint' }, `Skill estimate ${profile.skill.toFixed(2)} (${skill.label()}). Enemy speed multiplier x${skill.multiplier().toFixed(2)} in Practice. Daily Runs stay fixed so the ranking is fair.`),
-    ),
-    h('p', { class: 'hint' }, `Today: ${THEMES[weekdayOf(app.today())]!.name}.`),
-    button('BACK', () => { sfx.click(); app.goTitle(); }),
+  const el = h('div', { class: 'page' },
+    h('div', { class: 'page-head' }, h('h2', { class: 'page-title' }, 'AI LAB'), h('span', { class: 'dim' }, `Today: ${THEMES[weekdayOf(app.today())]!.name}`), button('BACK', () => { sfx.click(); app.goTitle(); }, 'ghost small')),
+    paneSet([
+      {
+        label: 'BRAINS',
+        nodes: [
+          h('div', { class: 'card' },
+            h('div', { class: 'card-title' }, 'ENEMY BRAINS'),
+            h('pre', { class: 'diagram' }, 'every enemy:  DEN > ACTIVE <> SCARED > EATEN > DEN\nWednesday Special while ACTIVE:\n  PATROL <> CHASE  (range 7, gives up at 10)'),
+            ...(['blob', 'curry', 'chapati', 'special'] as const).map((k) => h('p', { class: 'hint' }, h('b', {}, `${ENEMY_INFO[k].name}: `), ENEMY_INFO[k].blurb)),
+            toggle('SHOW ENEMY PATHS IN GAME', 'showPaths'),
+          ),
+          h('div', { class: 'card' },
+            h('div', { class: 'card-title' }, '4. ADAPTIVE DIFFICULTY'),
+            h('p', { class: 'hint' }, `Skill estimate ${profile.skill.toFixed(2)} (${skill.label()}). Enemy speed multiplier x${skill.multiplier().toFixed(2)} in Practice. Daily Runs stay fixed so the ranking is fair.`),
+          ),
+        ],
+      },
+      { label: 'PATHS', nodes: [h('div', { class: 'card' }, h('div', { class: 'card-title' }, '1. PATHFINDING BENCHMARK'), button('RUN', runBench, 'small'), benchOut)] },
+      { label: 'BOT', nodes: [h('div', { class: 'card' }, h('div', { class: 'card-title' }, '2. BOT PLAYTESTER'), daySel, runBtn, botOut)] },
+      { label: 'REPLAY', nodes: [h('div', { class: 'card' }, h('div', { class: 'card-title' }, '3. DETERMINISM CHECK'), button('RECORD + REPLAY', runReplay, 'small'), replayOut)] },
+    ]),
   );
-  return { el, dispose: () => void (alive = false) };
+  return { el, fit: true, dispose: () => void (alive = false) };
 }

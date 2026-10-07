@@ -103,7 +103,10 @@ export class GameView {
       this.wrap, this.ticker, dpad,
     );
 
-    const ro = new ResizeObserver(() => this.fit());
+    const ro = new ResizeObserver(() => {
+      this.fit();
+      this.fitOverlay();
+    });
     ro.observe(this.wrap);
     this.disposers.push(() => ro.disconnect());
 
@@ -331,6 +334,17 @@ export class GameView {
     clear(this.overlay);
     for (const k of kids) if (k) this.overlay.append(k);
     this.overlay.classList.remove('hidden');
+    this.fitOverlay();
+  }
+
+  /** Overlay panels never scroll: if one is taller than the play area it is scaled down to fit. */
+  private fitOverlay(): void {
+    const panel = this.overlay.firstElementChild as HTMLElement | null;
+    if (!panel || this.overlay.classList.contains('hidden')) return;
+    panel.style.transform = '';
+    const avail = this.overlay.clientHeight - 16;
+    const need = panel.offsetHeight;
+    if (avail > 0 && need > avail) panel.style.transform = `scale(${(avail / need).toFixed(3)})`;
   }
 
   private hideOverlay(): void {

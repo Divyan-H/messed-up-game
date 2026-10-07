@@ -82,12 +82,11 @@ export function titleScreen(app: App): Screen {
         }),
         h('span', { class: 'names' }, items.map((i) => i.name).join(' / '))));
 
-  const el = h('div', { class: 'title scroll' },
+  const hero = h('div', { class: 't-hero' },
     h('div', { class: 'daybadge' }, `${theme.name.toUpperCase()} - ${theme.title.toUpperCase()}`),
     h('h1', { class: 'logo' }, h('span', {}, 'MESSED'), h('span', {}, 'UP')),
     h('p', { class: 'tagline' }, 'Survive the week. Skip the sambar.'),
     marquee,
-
     h('div', { class: 'card streak' },
       spriteImg(sprite('flame'), 4),
       h('div', { class: 'streak-main' },
@@ -100,7 +99,9 @@ export function titleScreen(app: App): Screen {
       ),
     ),
     h('p', { class: 'hint' }, STREAK_MSG[status]),
+  );
 
+  const actions = h('div', { class: 't-actions' },
     dailyBtn,
     h('p', { class: 'hint' }, done ? h('span', {}, 'Next menu in ', countdown) : h('span', {}, 'Same maze for everyone. One try a day. Menu resets in ', countdown)),
     button('PRACTICE', () => { sfx.click(); app.goPractice(); }),
@@ -123,9 +124,11 @@ export function titleScreen(app: App): Screen {
     h('label', { class: 'namebox' }, h('span', {}, 'YOUR NAME'), nameInput),
     h('p', { class: 'tip' }, LOADING_TIPS[Math.floor(Math.random() * LOADING_TIPS.length)]),
   );
+  const el = h('div', { class: 'title' }, hero, actions);
 
   return {
     el,
+    fit: true,
     dispose: () => {
       cancelAnimationFrame(raf);
       clearInterval(timer);

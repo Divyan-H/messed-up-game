@@ -394,3 +394,48 @@ body {
     linear-gradient(rgba(14, 7, 3, 0.74), rgba(14, 7, 3, 0.74)),
     repeating-linear-gradient(90deg, #4f2f19 0 22px, #5a361d 22px 44px);
 }
+
+/* ---------- no-scroll pages: every menu page is laid out at a chosen width, then scaled to fit the viewport ---------- */
+html, body { overflow: hidden; }
+.scroll, .overlay { overflow: hidden; }
+.fit-host { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.fit-inner { flex: none; container-type: inline-size; transform-origin: center center; }
+.title, .page { padding: 14px 18px 16px; }
+
+.page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.page-head .page-title { flex: 1; margin: 0; text-align: left; }
+.page-head .btn { width: auto; margin: 0; flex: none; }
+.page-head .daybadge { flex: none; }
+.page .btn.small { margin-top: 0; }
+
+/* title: hero on the left, actions on the right when wide */
+.t-hero, .t-actions { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+@container (min-width: 700px) {
+  .title { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; align-items: center; }
+  .logo { font-size: calc(46px * var(--ui) * var(--fz)); }
+}
+
+/* tabbed pane sets: tabs + one pane when narrow, every card at once in a grid when wide */
+.panetabs { margin-bottom: 8px; }
+.panes { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); align-items: start; }
+.pane { display: contents; }
+.panes .card { margin: 0; }
+@container (min-width: 700px) { .panetabs { display: none; } }
+@container (max-width: 699px) {
+  .panes { grid-template-columns: 1fr; }
+  .pane { display: flex; flex-direction: column; gap: 8px; grid-area: 1 / 1; visibility: hidden; }
+  .pane.on { visibility: visible; }
+}
+
+.daylist { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px; }
+.p-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 4px; }
+.p-actions .btn { margin: 0; }
+.p-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.p-foot .btn { width: auto; }
+.preview .quip { min-height: 0; margin: 8px 0 2px; }
+.stats { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.badges { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.tbl, .lab-out { max-width: 100%; }
+
+.overlay { align-items: center; }
+.overlay .panel { margin: 0 auto; transform-origin: center center; }

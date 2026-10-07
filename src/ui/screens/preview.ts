@@ -8,7 +8,7 @@ import { ENEMY_SPRITE, sprite, type SpriteName } from '../../render/art';
 import { FOOD_VIEW } from '../../render/foodSprites';
 import type { App, Screen } from '../app';
 import { button, h, spriteImg } from '../dom';
-import { levelPicker } from '../widgets';
+import { levelPicker, paneSet } from '../widgets';
 
 export interface PreviewOptions {
   weekday: number;
@@ -72,35 +72,47 @@ export function previewScreen(app: App, o: PreviewOptions): Screen {
   };
   window.addEventListener('keydown', onKey);
 
-  const el = h('div', { class: 'page scroll preview' },
-    h('div', { class: 'daybadge' }, `${WEEKDAY_NAMES[o.weekday]!.toUpperCase()} - ${theme.title.toUpperCase()}`),
-    h('h2', { class: 'page-title' }, o.mode === 'daily' ? "TODAY'S MENU" : 'MENU CARD'),
+  const el = h('div', { class: 'page preview' },
+    h('div', { class: 'page-head' },
+      h('h2', { class: 'page-title' }, o.mode === 'daily' ? "TODAY'S MENU" : 'MENU CARD'),
+      h('div', { class: 'daybadge' }, `${WEEKDAY_NAMES[o.weekday]!.toUpperCase()} - ${theme.title.toUpperCase()}`),
+    ),
     h('p', { class: 'hint' }, 'Eat every dish (+10 each, chain them for a combo). Dodge the rest.'),
-    courseCard(0), courseCard(1), courseCard(2),
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, 'EXTRAS'),
-      h('div', { class: 'foods' },
-        tile(FOOD_VIEW[menu.snack.kind].sprite, menu.snack.name, 'BONUS +100', () => 'Bonus snack: appears near the kitchen for a few seconds. Risky, tasty.'),
-        tile('maggi', 'Outside Maggi', 'POWER-UP', () => 'Maggi scares every dish. Eat them for 200, 400, 800 and 1600.'),
-      ),
-    ),
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, 'WATCH OUT'),
-      roster,
-    ),
+    paneSet([
+      {
+        label: 'DISHES',
+        nodes: [
+          courseCard(0), courseCard(1), courseCard(2),
+          h('div', { class: 'card' },
+            h('div', { class: 'card-title' }, 'EXTRAS'),
+            h('div', { class: 'foods' },
+              tile(FOOD_VIEW[menu.snack.kind].sprite, menu.snack.name, 'BONUS +100', () => 'Bonus snack: appears near the kitchen for a few seconds. Risky, tasty.'),
+              tile('maggi', 'Outside Maggi', 'POWER-UP', () => 'Maggi scares every dish. Eat them for 200, 400, 800 and 1600.'),
+            ),
+          ),
+        ],
+      },
+      {
+        label: 'DANGER',
+        nodes: [
+          h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'WATCH OUT'), roster),
+          h('div', { class: 'card' }, h('div', { class: 'card-title' }, 'DIFFICULTY'), levelPicker(app, paintRoster)),
+        ],
+      },
+    ]),
     quip,
-    h('div', { class: 'card' },
-      h('div', { class: 'card-title' }, 'DIFFICULTY'),
-      levelPicker(app, paintRoster),
+    h('div', { class: 'p-actions' },
+      button(o.mode === 'daily' ? 'START DAILY RUN' : 'START PRACTICE', start, 'primary big'),
+      button('BACK', back, 'ghost'),
     ),
-    button(o.mode === 'daily' ? 'START DAILY RUN' : 'START PRACTICE', start, 'primary big'),
-    o.mode === 'daily' ? h('p', { class: 'hint' }, 'Your one daily attempt begins when you press START.') : null,
-    button('BACK', back, 'ghost'),
-    button('START & SKIP THIS SCREEN NEXT TIME', () => {
-      app.setSetting('menuPreview', false);
-      sfx.click();
-      start();
-    }, 'small linkish'),
+    h('div', { class: 'p-foot' },
+      o.mode === 'daily' ? h('span', { class: 'dim' }, 'Your one daily attempt begins when you press START.') : null,
+      button('START & SKIP THIS SCREEN NEXT TIME', () => {
+        app.setSetting('menuPreview', false);
+        sfx.click();
+        start();
+      }, 'small linkish'),
+    ),
   );
-  return { el, dispose: () => window.removeEventListener('keydown', onKey) };
+  return { el, fit: true, dispose: () => window.removeEventListener('keydown', onKey) };
 }

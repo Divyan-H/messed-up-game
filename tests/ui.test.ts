@@ -7,7 +7,7 @@ import { ENEMY_SPRITE, PALETTE, SPRITES, SPRITE_SIZE } from '../src/render/art';
 import { FOOD_SPRITES } from '../src/render/foodArt';
 import { FOOD_VIEW } from '../src/render/foodSprites';
 import { DEFAULT_SETTINGS, sanitizeSettings } from '../src/services/profile';
-import { computeLayout, fitScale } from '../src/ui/layout';
+import { chooseFit, computeLayout, fitScale } from '../src/ui/layout';
 
 describe('food art', () => {
   it('every dish on every menu has a sprite, a crumb colour and jokes', () => {
@@ -159,5 +159,23 @@ describe('dining hall look', () => {
     expect(mix('#000000', '#ffffff', 1)).toBe('rgb(255,255,255)');
     expect(shade('#808080', -1)).toBe('rgb(0,0,0)');
     expect(shade('#808080', 1)).toBe('rgb(255,255,255)');
+  });
+});
+
+describe('page fitting (no scrolling)', () => {
+  // a page whose content height shrinks as it is laid out wider
+  const heightAt = (w: number) => 60000 / w + 100;
+
+  it('always returns a scale at which the whole page fits the viewport', () => {
+    for (const [aw, ah] of [[1366, 650], [1920, 1080], [375, 812], [844, 390], [3840, 2160]] as const) {
+      const { width, scale } = chooseFit(aw, ah, heightAt);
+      expect(width * scale).toBeLessThanOrEqual(aw + 0.5);
+      expect(heightAt(width) * scale).toBeLessThanOrEqual(ah + 0.5);
+    }
+  });
+
+  it('uses the wide (all cards visible) layout on landscape screens and tabs on portrait phones', () => {
+    expect(chooseFit(1366, 650, heightAt).width).toBeGreaterThanOrEqual(700);
+    expect(chooseFit(375, 812, heightAt).width).toBeLessThan(700);
   });
 });

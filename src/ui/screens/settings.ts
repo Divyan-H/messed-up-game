@@ -1,7 +1,7 @@
 import { sfx } from '../../audio/sfx';
 import type { App, Screen } from '../app';
 import { button, h } from '../dom';
-import { levelPicker, segmented, toggle } from '../widgets';
+import { levelPicker, paneSet, segmented, toggle } from '../widgets';
 
 type BoolKey = Parameters<App['toggleSetting']>[0];
 
@@ -46,11 +46,11 @@ export function settingsScreen(app: App): Screen {
     app.goSettings();
   }, 'ghost');
 
-  const el = h('div', { class: 'page scroll' },
-    h('h2', { class: 'page-title' }, 'SETTINGS'),
-    h('p', { class: 'hint' }, 'Changes save instantly on this device.'),
+  const el = h('div', { class: 'page' },
+    h('div', { class: 'page-head' }, h('h2', { class: 'page-title' }, 'SETTINGS'), h('span', { class: 'dim' }, 'Saved instantly on this device.'), reset, button('BACK', () => { sfx.click(); app.goTitle(); }, 'ghost small')),
+    paneSet([
 
-    h('div', { class: 'card' },
+      { label: 'GAMEPLAY', nodes: [h('div', { class: 'card' },
       h('div', { class: 'card-title' }, 'GAMEPLAY'),
       h('div', { class: 'set-label' }, h('b', {}, 'DIFFICULTY'), h('span', { class: 'dim' }, 'Applies to Daily and Practice. Your final score is multiplied, so ranks stay fair.')),
       levelPicker(app),
@@ -58,9 +58,9 @@ export function settingsScreen(app: App): Screen {
       row('SHOW ENEMY PATHS', 'Draw each enemy\'s A* route on the maze.', sw('showPaths')),
       row('HINT TICKER', 'Funny one-liners under the maze.', sw('tips')),
       row('MENU CARD BEFORE PLAY', 'Show today\'s dishes before each run.', sw('menuPreview')),
-    ),
+    )] },
 
-    h('div', { class: 'card' },
+      { label: 'DISPLAY', nodes: [h('div', { class: 'card' },
       h('div', { class: 'card-title' }, 'DISPLAY'),
       row('CRT SCANLINES', null, sw('crt')),
       row('HIGH CONTRAST', 'Brighter text and edges, no scanlines.', sw('highContrast')),
@@ -70,24 +70,22 @@ export function settingsScreen(app: App): Screen {
       row('PARTICLES', 'Crumbs when you eat. Lower on slow phones.', segmented([{ id: 'full', label: 'FULL' }, { id: 'low', label: 'LOW' }, { id: 'off', label: 'OFF' }], s().particles, (v) => app.setSetting('particles', v))),
       row('REDUCE MOTION', 'No screen shake or blinking.', sw('reducedMotion')),
       row('SHOW FPS', 'Frame rate counter in the game.', sw('showFps')),
-    ),
+    )] },
 
-    h('div', { class: 'card' },
+      { label: 'CONTROLS', nodes: [h('div', { class: 'card' },
       h('div', { class: 'card-title' }, 'CONTROLS'),
       h('p', { class: 'hint left' }, 'Arrows or WASD, swipe on the maze, or the on-screen pad. P or Esc pauses.'),
       row('ON-SCREEN PAD', 'Auto shows it on touch screens.', segmented([{ id: 'auto', label: 'AUTO' }, { id: 'on', label: 'ON' }, { id: 'off', label: 'OFF' }], s().pad, (v) => app.setSetting('pad', v))),
       row('PAD POSITION', 'Left or right for one-handed play.', segmented([{ id: 'left', label: 'LEFT' }, { id: 'center', label: 'MID' }, { id: 'right', label: 'RIGHT' }], s().padSide, (v) => app.setSetting('padSide', v))),
       row('VIBRATION', 'Buzz when you lose a stomach (phones).', sw('vibrate')),
-    ),
+    )] },
 
-    h('div', { class: 'card' },
+      { label: 'AUDIO', nodes: [h('div', { class: 'card' },
       h('div', { class: 'card-title' }, 'AUDIO'),
       row('SOUND', null, sw('sound')),
       row('VOLUME', null, h('div', { class: 'vol-wrap' }, slider, readout)),
-    ),
-
-    reset,
-    button('BACK', () => { sfx.click(); app.goTitle(); }),
+    )] },
+    ]),
   );
-  return { el };
+  return { el, fit: true };
 }

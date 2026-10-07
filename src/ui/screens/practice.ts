@@ -30,17 +30,16 @@ export function practiceScreen(app: App): Screen {
     return b;
   });
 
-  const el = h('div', { class: 'page scroll' },
-    h('h2', { class: 'page-title' }, 'PRACTICE'),
+  const el = h('div', { class: 'page' },
+    h('div', { class: 'page-head' }, h('h2', { class: 'page-title' }, 'PRACTICE'), button('BACK', () => { sfx.click(); app.goTitle(); }, 'ghost small')),
     h('p', { class: 'hint' }, 'Pick a day. Random maze, no streak, no ranking. Difficulty and adaptive AI are in Settings.'),
-    h('div', { class: 'card' },
+    h('div', { class: 'card mood-card' },
       h('div', { class: 'card-title' }, "CHEF'S MOOD"),
       h('div', { class: 'mood' }, skill.label()),
       h('p', { class: 'hint' }, `The game watches how you play and tunes enemy speed (x${skill.multiplier().toFixed(2)} right now).`),
     ),
     h('div', { class: 'daylist' }, ...rows),
     h('p', { class: 'hint' }, `Today's boss: ${ENEMY_INFO.special.name}. ${ENEMY_INFO.special.blurb}`),
-    button('BACK', () => { sfx.click(); app.goTitle(); }, 'ghost'),
   );
-  return { el };
+  return { el, fit: true };
 }
