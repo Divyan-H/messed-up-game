@@ -6,13 +6,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev:api": "tsx scripts/dev-api.ts",
+    "build": "tsc --noEmit && vite build && npm run build:api",
+    "build:api": "vite build --config vite.server.config.ts",
     "preview": "vite preview",
+    "serve:prod": "tsx scripts/dev-api.ts --prod",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "playtest": "tsx scripts/playtest.ts",
     "snapshot": "tsx scripts/snapshot.ts",
-    "foodsheet": "tsx scripts/foodsheet.ts"
+    "foodsheet": "tsx scripts/foodsheet.ts",
+    "admin": "tsx scripts/admin.ts"
   },
   "dependencies": {
     "@fontsource/press-start-2p": "^5.3.0"

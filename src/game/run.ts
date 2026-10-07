@@ -173,16 +173,27 @@ export class Run {
   }
 }
 
-/** Re-simulates a recorded run from its log. Equal results prove the run is reproducible/verifiable. */
-export function replayRun(cfg: RunConfig, log: ReplayLog, maxTicks = 60 * 60 * 15): Run {
+/** Longest run the game (and the server's verifier) will simulate: 15 minutes of play. */
+export const MAX_RUN_TICKS = 60 * 60 * 15;
+
+/**
+ * Re-simulates a recorded run from its log. Equal results prove the run is reproducible/verifiable.
+ * `untilTick` stops early, which replays a run that was quit (or abandoned) part-way through.
+ */
+export function replayRun(cfg: RunConfig, log: ReplayLog, maxTicks = MAX_RUN_TICKS, untilTick = maxTicks): Run {
   const run = new Run(cfg);
+  const limit = Math.min(maxTicks, untilTick);
   let di = 0;
   let pi = 0;
   let code: InputCode = 0;
-  while (!run.finished && run.tickCount < maxTicks) {
+  const applyPerks = () => {
     while (pi < log.perks.length && log.perks[pi]![0] <= run.tickCount) run.choosePerk(log.perks[pi++]![1]);
+  };
+  while (!run.finished && run.tickCount < limit) {
+    applyPerks();
     while (di < log.dirs.length && log.dirs[di]![0] <= run.tickCount) code = log.dirs[di++]![1];
     run.tick(code);
   }
+  applyPerks();
   return run;
 }
