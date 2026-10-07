@@ -5,21 +5,24 @@
  */
 import { formatCountdown, msUntilNextIstMidnight } from '../core/clock';
 import { sfx } from '../audio/sfx';
-import { COURSES, DT, MAX_STOMACHS, THEMES, WEEKDAY_NAMES } from '../game/config';
+import { COURSES, DT, MAX_STOMACHS, THEMES, TILE, WEEKDAY_NAMES } from '../game/config';
 import { ACHIEVEMENTS, COMBO_CALLS, DEATH_LINES, LOADING_TIPS, QUIPS_BY_FOOD, WARDEN_BARKS, WARDEN_WARNINGS } from '../game/content';
 import { Bot } from '../game/bot';
 import { LEVELS, SkillModel, type Level } from '../game/difficulty';
 import { MENUS, mealItems, uniqueItems } from '../game/menu';
+import { xOf, yOf } from '../game/maze';
+import { moverX, moverY } from '../game/mover';
 import { Run, type RunConfig, type RunEvent, type RunPhase } from '../game/run';
 import { ENEMY_SPRITE, sprite } from '../render/art';
 import { createSurface } from '../render/canvas';
 import { Effects } from '../render/effects';
 import { FOOD_VIEW } from '../render/foodSprites';
-import { Renderer, VIEW_H, VIEW_W } from '../render/renderer';
+import { HEADER_H, Renderer, VIEW_H, VIEW_W } from '../render/renderer';
 import type { App, Screen } from './app';
 import { button, clear, fmt, h, spriteImg } from './dom';
 import { InputController } from './input';
 import { fitScale } from './layout';
+import { runTour, type TourHandle } from './tour';
 
 const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
 
@@ -40,6 +43,11 @@ export class GameView {
   private last = 0;
   private acc = 0;
   private paused = false;
+  private tourOpen = false;
+  /** The course intro card stays up (and the clock stands still) until the player closes it. */
+  private introOpen = false;
+  private tour: TourHandle | null = null;
+  private hudEl: HTMLElement | null = null;
   private finalized = false;
   private stageRef: Run['stage'] | null = null;
   private lastBonus = 0;
@@ -95,7 +103,7 @@ export class GameView {
     this.ticker.classList.toggle('hidden', !this.app.settings.tips);
     const el = h('div', { class: 'game' },
       h('div', { class: 'hud' },
-        h('div', { class: 'hud-row' }, this.hearts, this.scoreEl, button('II', () => this.togglePause(), 'tiny')),
+        h('div', { class: 'hud-row' }, this.hearts, this.scoreEl, h('div', { class: 'hud-btns' }, button('?', () => this.maybeTour(true), 'tiny help'), button('II', () => this.togglePause(), 'tiny pause'))),
         h('div', { class: 'hud-row' }, this.dayEl, this.leftEl),
         h('div', { class: 'hud-row' }, h('div', { class: 'bar hunger' }, this.hungerBar), this.comboEl),
         this.maggiWrap,
@@ -103,6 +111,7 @@ export class GameView {
       this.wrap, this.ticker, dpad,
     );
 
+    this.hudEl = el;
     const ro = new ResizeObserver(() => {
       this.fit();
       this.fitOverlay();
@@ -118,7 +127,15 @@ export class GameView {
       if (this.cfg.mode === 'daily' && this.run.tickCount > 0) this.finalize();
     };
     window.addEventListener('pagehide', hide);
+    const introKey = (e: KeyboardEvent) => {
+      if (!this.introOpen || this.tourOpen || !['Enter', 'Space', 'Escape'].includes(e.code)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.dismissIntro();
+    };
+    window.addEventListener('keydown', introKey, true);
     this.disposers.push(() => {
+      window.removeEventListener('keydown', introKey, true);
       document.removeEventListener('visibilitychange', vis);
       window.removeEventListener('pagehide', hide);
     });
@@ -131,6 +148,7 @@ export class GameView {
 
   private dispose(): void {
     cancelAnimationFrame(this.raf);
+    this.tour?.close();
     this.input.dispose();
     this.disposers.forEach((d) => d());
   }
@@ -151,7 +169,7 @@ export class GameView {
     this.raf = requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (ms - this.last) / 1000);
     this.last = ms;
-    if (!this.paused) {
+    if (!this.paused && !this.tourOpen && !this.introOpen) {
       this.acc += dt * SIM_SPEED;
       let steps = 0;
       while (this.acc >= DT && steps++ < 6 * SIM_SPEED) {
@@ -263,13 +281,61 @@ export class GameView {
   }
 
   private onPhase(phase: RunPhase): void {
-    if (phase === 'playing') this.hideOverlay();
+    if (phase === 'playing') {
+      this.hideOverlay();
+      this.maybeTour();
+    }
     else if (phase === 'clear') this.showClear();
     else if (phase === 'perk') this.showPerks();
     else if (phase === 'over' || phase === 'complete') {
       this.finalize();
       this.showEnd();
     }
+  }
+
+  // ---------------------------------------------------------------- first-time tour
+
+  /** Screen rectangle of a maze tile (the canvas is scaled to fit, so map from maze pixels to page pixels). */
+  private tileRect(col: number, row: number): DOMRect | null {
+    const r = this.canvas.getBoundingClientRect();
+    if (!r.width) return null;
+    const k = r.width / VIEW_W;
+    return new DOMRect(r.left + col * TILE * k, r.top + (HEADER_H + row * TILE) * k, TILE * k, TILE * k);
+  }
+
+  /** Explains the interface the first time anyone plays. The simulation is frozen while it is open. */
+  private maybeTour(force = false): void {
+    if (this.tour || this.run.phase !== 'playing' || (!force && this.app.profile.get().tourSeen)) return;
+    if (this.paused) this.togglePause(false);
+    const st = this.run.stage;
+    const hud = (sel: string) => () => this.hudEl?.querySelector(sel)?.getBoundingClientRect() ?? null;
+    const p = st.player;
+    const enemy = st.enemies.find((e) => e.mode !== 'eaten');
+    const food = st.foodAt.values().next().value;
+    const maggi = st.maggiAlive.values().next().value as number | undefined;
+    const steps = [
+      { target: () => this.tileRect(moverX(p), moverY(p)), title: 'THIS IS YOU', text: 'The hungry student with the white glow. Steer with Arrow keys / WASD, swipe on the maze, or the on-screen pad. You keep moving until you turn.' },
+      { target: () => (enemy ? this.tileRect(moverX(enemy.m), moverY(enemy.m)) : null), title: 'THE CHASERS', text: 'Angry dishes with a red glow hunt you. Touching one costs a stomach. They turn blue when scared, and then YOU can eat them.' },
+      { target: () => (food ? this.tileRect(xOf(food.tile), yOf(food.tile)) : null), title: 'DISHES', text: 'Eat every dish for +10 each. Eat quickly to chain a combo, up to x5.' },
+      { target: () => (maggi !== undefined ? this.tileRect(xOf(maggi), yOf(maggi)) : null), title: 'OUTSIDE MAGGI', text: 'A power-up. Eat it and every chaser gets scared for a few seconds. Chase them down for big points.' },
+      { target: () => this.tileRect(xOf(st.layout.exit), yOf(st.layout.exit)), title: 'THE EXIT', text: 'It opens once every dish is eaten. Run for the door to clear the course.' },
+      { target: hud('.hearts'), title: 'STOMACHS', text: 'Your lives. Touching a chaser or starving costs one. Lose them all and the day is over.' },
+      { target: hud('.score'), title: 'SCORE', text: 'Your points. The combo meter next to the hunger bar shows your chain.' },
+      { target: hud('.hunger'), title: 'HUNGER BAR', text: 'It drains over time and refills when you eat. If it hits zero you lose a stomach, so keep eating.' },
+      { target: hud('.pause'), title: 'PAUSE', text: 'Tap here, or press P or Esc, to pause. The ? button beside it replays this tour any time.' },
+    ];
+    this.tourOpen = true;
+    this.input.reset();
+    this.tour = runTour(steps, {
+      onEnd: () => {
+        this.tour = null;
+        this.tourOpen = false;
+        this.last = performance.now();
+        this.input.reset();
+        this.app.profile.update((pr) => void (pr.tourSeen = true));
+      },
+    });
+    if (!this.tourOpen) this.tour = null;
   }
 
   // ---------------------------------------------------------------- HUD
@@ -355,7 +421,10 @@ export class GameView {
     const theme = THEMES[this.cfg.weekday]!;
     const items = uniqueItems(mealItems(MENUS[this.cfg.weekday]!, course));
     const roster = this.run.stage.params.difficulty.roster;
+    this.introOpen = !AUTOPILOT;
+    this.input.reset();
     this.showOverlay(h('div', { class: 'panel intro' },
+      h('button', { class: 'x-close', type: 'button', 'aria-label': 'Close', onclick: () => this.dismissIntro() }, 'X'),
       h('div', { class: 'dim' }, `COURSE ${course + 1} OF 3`),
       h('h2', { class: 'big' }, `${theme.name.toUpperCase()}`),
       h('h3', { class: 'accent' }, COURSES[course]!.toUpperCase()),
@@ -364,7 +433,18 @@ export class GameView {
         h('div', { class: 'food-tile static' }, spriteImg(sprite(FOOD_VIEW[i.kind].sprite), 3), h('span', { class: 'fname' }, i.name)))),
       h('div', { class: 'roster' }, ...roster.map((k) => spriteImg(sprite(ENEMY_SPRITE[k]), 3))),
       this.app.settings.tips ? h('p', { class: 'tip' }, pick(LOADING_TIPS)) : null,
+      button('START', () => this.dismissIntro(), 'primary'),
+      h('p', { class: 'dim' }, 'Press Enter or tap X'),
     ));
+  }
+
+  private dismissIntro(): void {
+    if (!this.introOpen) return;
+    this.introOpen = false;
+    sfx.click();
+    this.last = performance.now();
+    this.input.reset();
+    this.hideOverlay();
   }
 
   private showClear(): void {
@@ -408,6 +488,7 @@ export class GameView {
       h('h2', { class: 'big' }, 'PLATE BREAK'),
       h('p', { class: 'hint' }, 'The warden is also on a tea break.'),
       button('RESUME', () => this.togglePause(false), 'primary'),
+      button('HOW TO PLAY (TOUR)', () => this.maybeTour(true)),
       button(s.sound ? 'SOUND: ON' : 'SOUND: OFF', () => { this.app.toggleSetting('sound'); this.togglePause(true); }),
       button(s.crt ? 'SCANLINES: ON' : 'SCANLINES: OFF', () => { this.app.toggleSetting('crt'); this.togglePause(true); }),
       button(s.showPaths ? 'ENEMY PATHS: ON' : 'ENEMY PATHS: OFF', () => { this.app.toggleSetting('showPaths'); this.togglePause(true); }),

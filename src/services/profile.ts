@@ -106,6 +106,8 @@ export interface Profile {
   skill: number;
   achievements: string[];
   settings: Settings;
+  /** True once the first-game guided tour has been seen (or skipped). */
+  tourSeen: boolean;
 }
 
 const KEY = 'messedup:profile:v1';
@@ -134,6 +136,7 @@ const defaults = (): Profile => ({
   skill: 0.5,
   achievements: [],
   settings: { ...DEFAULT_SETTINGS },
+  tourSeen: false,
 });
 
 export class ProfileStore {
