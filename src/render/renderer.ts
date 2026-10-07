@@ -114,6 +114,13 @@ export class Renderer {
 
     // enemies
     const all = stage.warden ? [...stage.enemies, stage.warden] : stage.enemies;
+    // pulsing halos under everyone (stronger for the first few seconds of a stage) so characters are easy to find
+    const intro = Math.max(0, 1 - stage.time / 4);
+    for (const e of all) {
+      if (e.mode === 'den' || e.mode === 'eaten') continue;
+      this.halo(moverX(e.m), moverY(e.m), e.mode === 'scared' ? '76,201,240' : '255,45,45', anim, intro, e.id);
+    }
+    this.halo(moverX(stage.player), moverY(stage.player), '255,255,255', anim, intro, 0);
     for (const e of all) this.drawEnemy(e, stage, anim);
 
     // player
@@ -136,6 +143,27 @@ export class Renderer {
 
     fx.draw(ctx);
     ctx.restore();
+  }
+
+  /** Soft pulsing glow centred on a character, plus an expanding ring right after a stage starts. */
+  private halo(tx: number, ty: number, rgb: string, anim: number, intro: number, phase: number): void {
+    const ctx = this.ctx;
+    const cx = tx * TILE + TILE / 2;
+    const cy = ty * TILE + TILE / 2;
+    const pulse = 0.5 + 0.5 * Math.sin(anim * 7 + phase);
+    const r = 13 + pulse * 4 + intro * 6;
+    const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, r);
+    g.addColorStop(0, `rgba(${rgb},${0.5 + pulse * 0.25 + intro * 0.2})`);
+    g.addColorStop(1, `rgba(${rgb},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    if (intro > 0) {
+      ctx.strokeStyle = `rgba(${rgb},${0.9 * intro})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8 + ((anim * 14 + phase * 3) % 14), 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   /** Pixel triangle pointing down at a character's head (11 x 6, ink outline). */
