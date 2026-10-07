@@ -27,9 +27,9 @@ export interface LevelDef {
 }
 
 export const LEVELS: Record<Level, LevelDef> = {
-  easy: { label: 'EASY', blurb: 'Slower dishes, fewer dishes to eat, 4 stomachs, longer Maggi, no boss. Score x0.75.', speed: 0.72, release: 1.6, hunger: 1.3, food: -2, maggi: 2, stomachs: 4, cap: 0.9, score: 0.75 },
+  easy: { label: 'EASY', blurb: 'Slower dishes, fewer dishes to eat, 4 stomachs, longer Maggi, no boss. Score x0.6.', speed: 0.72, release: 1.6, hunger: 1.3, food: -2, maggi: 2, stomachs: 4, cap: 0.9, score: 0.6 },
   normal: { label: 'NORMAL', blurb: 'The intended recipe. Score x1.', speed: 1, release: 1, hunger: 1, food: 0, maggi: 0, stomachs: 3, cap: 0.9, score: 1 },
-  hard: { label: 'HARD', blurb: 'Faster dishes, more dishes to eat, quicker releases, shorter Maggi, hungrier you. Score x1.5.', speed: 1.08, release: 0.75, hunger: 0.8, food: 2, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.5 },
+  hard: { label: 'HARD', blurb: 'Faster dishes, more dishes to eat, quicker releases, shorter Maggi, hungrier you. Score x1.2.', speed: 1.08, release: 0.75, hunger: 0.8, food: 2, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.2 },
 };
 
 export const asLevel = (v: unknown): Level => (v === 'easy' || v === 'hard' ? v : 'normal');
