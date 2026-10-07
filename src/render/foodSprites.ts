@@ -1,0 +1,37 @@
+import type { FoodKind } from '../game/menu';
+import type { SpriteName } from './art';
+
+/** How each dish looks: its sprite, and the crumb colour used when it is eaten. */
+export const FOOD_VIEW: Record<FoodKind, { sprite: SpriteName; color: string }> = {
+  idli: { sprite: 'idli', color: '#f4f4f0' },
+  egg: { sprite: 'egg', color: '#ffd23f' },
+  banana: { sprite: 'banana', color: '#ffd23f' },
+  poha: { sprite: 'poha', color: '#ffd23f' },
+  pongal: { sprite: 'pongal', color: '#f1e3c0' },
+  kichadi: { sprite: 'kichadi', color: '#d9a066' },
+  rice: { sprite: 'rice', color: '#f4f4f0' },
+  pulao: { sprite: 'pulao', color: '#fff1a8' },
+  friedrice: { sprite: 'friedrice', color: '#d9a066' },
+  biryani: { sprite: 'biryani', color: '#f4a261' },
+  curdrice: { sprite: 'curdrice', color: '#f4f4f0' },
+  rasam: { sprite: 'rasam', color: '#e63946' },
+  rasamPepper: { sprite: 'rasamPepper', color: '#8d5524' },
+  rasamGarlic: { sprite: 'rasamGarlic', color: '#e09f3e' },
+  buttermilk: { sprite: 'buttermilk', color: '#f1e3c0' },
+  milk: { sprite: 'milk', color: '#4cc9f0' },
+  poriyal: { sprite: 'poriyal', color: '#f9c74f' },
+  dal: { sprite: 'dal', color: '#ffd23f' },
+  kootu: { sprite: 'kootu', color: '#52b788' },
+  chips: { sprite: 'chips', color: '#3a86ff' },
+  mutter: { sprite: 'mutter', color: '#f4a261' },
+  chenna: { sprite: 'chenna', color: '#e63946' },
+  fruit: { sprite: 'fruit', color: '#e63946' },
+  icecream: { sprite: 'icecream', color: '#ff7eb6' },
+  corn: { sprite: 'corn', color: '#ffd23f' },
+  pavbhaji: { sprite: 'pavbhaji', color: '#e63946' },
+  sundal: { sprite: 'sundal', color: '#d9a066' },
+  puff: { sprite: 'puff', color: '#f9c74f' },
+  biscuit: { sprite: 'biscuit', color: '#d9a066' },
+  bun: { sprite: 'bun', color: '#f9c74f' },
+  cake: { sprite: 'cake', color: '#ff7eb6' },
+};

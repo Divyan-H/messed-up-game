@@ -1,0 +1,502 @@
+/**
+ * Play screen: owns the rAF loop (fixed 60 Hz simulation, free-running rendering), the HUD,
+ * overlays (intro / perks / clear / pause / game over) and the glue from sim events to
+ * audio, particles and funny text. The game rules themselves live in src/game and know nothing of this file.
+ */
+import { formatCountdown, msUntilNextIstMidnight } from '../core/clock';
+import { sfx } from '../audio/sfx';
+import { COURSES, DT, MAX_STOMACHS, THEMES, WEEKDAY_NAMES } from '../game/config';
+import { ACHIEVEMENTS, COMBO_CALLS, DEATH_LINES, LOADING_TIPS, QUIPS_BY_FOOD, WARDEN_BARKS, WARDEN_WARNINGS } from '../game/content';
+import { Bot } from '../game/bot';
+import { LEVELS, SkillModel, type Level } from '../game/difficulty';
+import { MENUS, mealItems, uniqueItems } from '../game/menu';
+import { Run, type RunConfig, type RunEvent, type RunPhase } from '../game/run';
+import { ENEMY_SPRITE, sprite } from '../render/art';
+import { createSurface } from '../render/canvas';
+import { Effects } from '../render/effects';
+import { FOOD_VIEW } from '../render/foodSprites';
+import { Renderer, VIEW_H, VIEW_W } from '../render/renderer';
+import type { App, Screen } from './app';
+import { button, clear, fmt, h, spriteImg } from './dom';
+import { InputController } from './input';
+import { fitScale } from './layout';
+
+const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
+
+/** `?autopilot` lets the bot play (great for demos); `?sim=4` runs the simulation faster (for testing). */
+const QUERY = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+const AUTOPILOT = QUERY.has('autopilot');
+const SIM_SPEED = Math.min(8, Math.max(1, Number(QUERY.get('sim') ?? 1) || 1));
+
+export class GameView {
+  private readonly run: Run;
+  private readonly fx = new Effects();
+  private readonly canvas = createSurface(VIEW_W, VIEW_H);
+  private readonly renderer: Renderer;
+  private readonly input: InputController;
+  private readonly disposers: Array<() => void> = [];
+
+  private raf = 0;
+  private last = 0;
+  private acc = 0;
+  private paused = false;
+  private finalized = false;
+  private stageRef: Run['stage'] | null = null;
+  private lastBonus = 0;
+  private toastTimer = 0;
+  private unlocked: string[] = [];
+  private bot = new Bot();
+  private readonly level: Level;
+
+  // DOM
+  private readonly hearts = h('div', { class: 'hearts' });
+  private readonly scoreEl = h('div', { class: 'score' }, '0');
+  private readonly dayEl = h('div', { class: 'daylabel' });
+  private readonly hungerBar = h('i');
+  private readonly maggiBar = h('i');
+  private readonly maggiWrap = h('div', { class: 'bar maggi hidden' }, this.maggiBar);
+  private readonly comboEl = h('div', { class: 'combo' });
+  private readonly leftEl = h('div', { class: 'left' });
+  private readonly toastEl = h('div', { class: 'toast' });
+  private readonly ticker = h('div', { class: 'ticker' }, pick(LOADING_TIPS));
+  private readonly overlay = h('div', { class: 'overlay hidden' });
+  private readonly wrap = h('div', { class: 'stage-wrap' });
+  private readonly fpsEl = h('div', { class: 'fps hidden' });
+  private fpsFrames = 0;
+  private fpsStamp = 0;
+
+  // HUD cache (only touch the DOM when a value changes)
+  private hud = { score: -1, stomachs: -1, left: -1, combo: '', day: '' };
+
+  constructor(private readonly app: App, private readonly cfg: RunConfig) {
+    this.level = cfg.level ?? 'normal';
+    this.run = new Run(cfg);
+    const ctx = this.canvas.getContext('2d')!;
+    this.renderer = new Renderer(ctx);
+    this.canvas.className = 'cv';
+    this.fx.reducedMotion = app.settings.reducedMotion;
+    this.fx.particles = app.settings.particles;
+    this.input = new InputController(this.wrap, {
+      onPause: () => this.togglePause(),
+      onNumber: (n) => this.pickPerk(n - 1),
+    });
+  }
+
+  screen(): Screen {
+    const pad = (cls: string, code: 1 | 2 | 3 | 4) => {
+      const b = h('button', { class: `pad ${cls}`, type: 'button', 'aria-label': cls });
+      this.input.bindButton(b, code);
+      return b;
+    };
+    const dpad = h('div', { class: 'dpad' }, pad('up', 1), pad('left', 4), pad('right', 2), pad('down', 3));
+
+    this.wrap.append(this.canvas, this.toastEl, this.fpsEl, this.overlay);
+    this.fpsEl.classList.toggle('hidden', !this.app.settings.showFps);
+    this.ticker.classList.toggle('hidden', !this.app.settings.tips);
+    const el = h('div', { class: 'game' },
+      h('div', { class: 'hud' },
+        h('div', { class: 'hud-row' }, this.hearts, this.scoreEl, button('II', () => this.togglePause(), 'tiny')),
+        h('div', { class: 'hud-row' }, this.dayEl, this.leftEl),
+        h('div', { class: 'hud-row' }, h('div', { class: 'bar hunger' }, this.hungerBar), this.comboEl),
+        this.maggiWrap,
+      ),
+      this.wrap, this.ticker, dpad,
+    );
+
+    const ro = new ResizeObserver(() => this.fit());
+    ro.observe(this.wrap);
+    this.disposers.push(() => ro.disconnect());
+
+    const vis = () => {
+      if (document.hidden && this.run.phase === 'playing' && !this.paused) this.togglePause(true);
+    };
+    document.addEventListener('visibilitychange', vis);
+    const hide = () => {
+      if (this.cfg.mode === 'daily' && this.run.tickCount > 0) this.finalize();
+    };
+    window.addEventListener('pagehide', hide);
+    this.disposers.push(() => {
+      document.removeEventListener('visibilitychange', vis);
+      window.removeEventListener('pagehide', hide);
+    });
+
+    this.syncStage();
+    this.last = performance.now();
+    this.raf = requestAnimationFrame(this.frame);
+    return { el, dispose: () => this.dispose() };
+  }
+
+  private dispose(): void {
+    cancelAnimationFrame(this.raf);
+    this.input.dispose();
+    this.disposers.forEach((d) => d());
+  }
+
+  private fit(): void {
+    const w = this.wrap.clientWidth;
+    const hh = this.wrap.clientHeight;
+    if (!w || !hh) return;
+    let scale = Math.min(w / VIEW_W, hh / VIEW_H);
+    scale = fitScale(scale, this.app.settings.scaleMode);
+    this.canvas.style.width = `${Math.floor(VIEW_W * scale)}px`;
+    this.canvas.style.height = `${Math.floor(VIEW_H * scale)}px`;
+  }
+
+  // ---------------------------------------------------------------- loop
+
+  private readonly frame = (ms: number): void => {
+    this.raf = requestAnimationFrame(this.frame);
+    const dt = Math.min(0.1, (ms - this.last) / 1000);
+    this.last = ms;
+    if (!this.paused) {
+      this.acc += dt * SIM_SPEED;
+      let steps = 0;
+      while (this.acc >= DT && steps++ < 6 * SIM_SPEED) {
+        if (AUTOPILOT && this.run.phase === 'perk') this.pickPerk(0);
+        this.run.tick(AUTOPILOT && this.run.phase === 'playing' ? this.bot.decide(this.run.stage) : this.input.code);
+        this.acc -= DT;
+      }
+      if (steps >= 6 * SIM_SPEED) this.acc = 0;
+      this.fx.update(dt);
+    }
+    this.consume();
+    this.syncStage();
+    this.renderer.draw(this.run.stage, this.fx, { anim: ms / 1000, showPaths: this.app.settings.showPaths || this.run.mods.showPaths });
+    this.updateHud();
+    if (this.app.settings.showFps) this.updateFps(ms);
+  };
+
+  private updateFps(ms: number): void {
+    this.fpsFrames++;
+    if (ms - this.fpsStamp < 500) return;
+    this.fpsEl.textContent = `${Math.round((this.fpsFrames * 1000) / (ms - this.fpsStamp))} FPS`;
+    this.fpsFrames = 0;
+    this.fpsStamp = ms;
+  }
+
+  private syncStage(): void {
+    if (this.stageRef === this.run.stage) return;
+    this.stageRef = this.run.stage;
+    this.bot = new Bot();
+    this.renderer.prepare(this.run.stage, THEMES[this.cfg.weekday]!);
+  }
+
+  // ---------------------------------------------------------------- events
+
+  private consume(): void {
+    for (const ev of this.run.drainEvents()) this.onEvent(ev);
+  }
+
+  private onEvent(ev: RunEvent): void {
+    const fx = this.fx;
+    const T = 16;
+    switch (ev.t) {
+      case 'stageStart':
+        this.input.reset();
+        fx.clear();
+        this.syncStage();
+        this.showIntro(ev.course);
+        break;
+      case 'phase':
+        this.onPhase(ev.phase);
+        break;
+      case 'eat': {
+        sfx.eat(ev.combo);
+        fx.burst(ev.x * T + 8, ev.y * T + 8, FOOD_VIEW[ev.item.kind].color, 7);
+        fx.popup(`+${ev.pts}`, ev.x * T + 8, ev.y * T, ev.mult > 1 ? '#70e000' : '#ffd23f');
+        if (ev.combo > 1 && ev.combo % 5 === 0) this.toast(COMBO_CALLS[Math.min(ev.mult, 5)] || 'COMBO!');
+        if (Math.random() < 0.2) this.say(pick(QUIPS_BY_FOOD[ev.item.kind]));
+        break;
+      }
+      case 'snackIn':
+        this.toast('BONUS SNACK APPEARED!');
+        break;
+      case 'snack':
+        sfx.snack();
+        fx.burst(ev.x * T + 8, ev.y * T + 8, '#f4a261', 12);
+        fx.popup(`+${ev.pts}`, ev.x * T + 8, ev.y * T, '#ffd23f');
+        this.say(pick(QUIPS_BY_FOOD[this.run.stage.snackItem.kind]));
+        break;
+      case 'maggi':
+        sfx.maggi();
+        this.toast('OUTSIDE MAGGI! Eat them!');
+        this.say('Maggi from outside: the ultimate cheat code.');
+        break;
+      case 'eatEnemy':
+        sfx.eatEnemy();
+        fx.shake(3);
+        fx.popup(`+${ev.pts}`, ev.x * T, ev.y * T, '#4cc9f0');
+        break;
+      case 'hit':
+        sfx.hit();
+        fx.shake(8);
+        if (this.app.settings.vibrate) navigator.vibrate?.(70);
+        fx.burst(this.run.stage.player.col * T + 8, this.run.stage.player.row * T + 8, '#e63946', 16, 70);
+        this.toast(ev.cause === 'starve' ? 'STARVED! No food, no life.' : 'OUCH! Lost a stomach.');
+        break;
+      case 'exitOpen':
+        sfx.exitOpen();
+        this.toast('EXIT OPEN! RUN!');
+        this.say('All dishes cleared. Find the door.');
+        break;
+      case 'wardenWarn':
+        this.say(pick(WARDEN_WARNINGS));
+        break;
+      case 'wardenIn':
+        sfx.warden();
+        this.toast(pick(WARDEN_BARKS));
+        break;
+      case 'clear':
+        this.lastBonus = ev.bonus;
+        sfx.clear();
+        break;
+      case 'lost':
+        sfx.over();
+        fx.shake(10);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private onPhase(phase: RunPhase): void {
+    if (phase === 'playing') this.hideOverlay();
+    else if (phase === 'clear') this.showClear();
+    else if (phase === 'perk') this.showPerks();
+    else if (phase === 'over' || phase === 'complete') {
+      this.finalize();
+      this.showEnd();
+    }
+  }
+
+  // ---------------------------------------------------------------- HUD
+
+  private updateHud(): void {
+    const run = this.run;
+    const st = run.stage;
+    const score = run.totalScore;
+    if (score !== this.hud.score) {
+      this.hud.score = score;
+      this.scoreEl.textContent = fmt(score);
+    }
+    const stomachs = Math.max(0, st.stomachs);
+    if (stomachs !== this.hud.stomachs) {
+      this.hud.stomachs = stomachs;
+      clear(this.hearts);
+      for (let i = 0; i < Math.min(stomachs, MAX_STOMACHS); i++) this.hearts.append(spriteImg(sprite('heart'), 2, 'px heart'));
+    }
+    const lvl = this.level === 'normal' ? '' : ` ${LEVELS[this.level].label}`;
+    const day = `${WEEKDAY_NAMES[this.cfg.weekday]!.slice(0, 3).toUpperCase()} ${COURSES[run.stageIndex]!.toUpperCase()}${lvl}`;
+    if (day !== this.hud.day) {
+      this.hud.day = day;
+      this.dayEl.textContent = day;
+    }
+    const left = st.exitOpen ? 0 : st.foodLeft;
+    if (left !== this.hud.left) {
+      this.hud.left = left;
+      this.leftEl.textContent = st.exitOpen ? 'GO TO EXIT!' : `DISHES LEFT ${left}`;
+      this.leftEl.classList.toggle('go', st.exitOpen);
+    }
+    this.hungerBar.style.width = `${Math.max(0, st.hunger) * 100}%`;
+    this.hungerBar.parentElement!.classList.toggle('low', st.hunger < 0.25);
+    const combo = st.combo > 1 ? `COMBO x${st.comboMult} (${st.combo})` : '';
+    if (combo !== this.hud.combo) {
+      this.hud.combo = combo;
+      this.comboEl.textContent = combo;
+    }
+    const on = st.maggiUntil > 0;
+    this.maggiWrap.classList.toggle('hidden', !on);
+    if (on) {
+      const total = st.params.difficulty.maggiSeconds + st.params.mods.maggiBonus;
+      this.maggiBar.style.width = `${Math.max(0, ((st.maggiUntil - st.time) / total) * 100)}%`;
+    }
+  }
+
+  private toast(text: string, ms = 1300): void {
+    this.toastEl.textContent = text;
+    this.toastEl.classList.remove('show');
+    void this.toastEl.offsetWidth;
+    this.toastEl.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), ms);
+  }
+
+  private say(text: string): void {
+    this.ticker.textContent = text;
+  }
+
+  // ---------------------------------------------------------------- overlays
+
+  private showOverlay(...kids: Array<Node | null>): void {
+    clear(this.overlay);
+    for (const k of kids) if (k) this.overlay.append(k);
+    this.overlay.classList.remove('hidden');
+  }
+
+  private hideOverlay(): void {
+    this.overlay.classList.add('hidden');
+  }
+
+  private showIntro(course: number): void {
+    const theme = THEMES[this.cfg.weekday]!;
+    const items = uniqueItems(mealItems(MENUS[this.cfg.weekday]!, course));
+    const roster = this.run.stage.params.difficulty.roster;
+    this.showOverlay(h('div', { class: 'panel intro' },
+      h('div', { class: 'dim' }, `COURSE ${course + 1} OF 3`),
+      h('h2', { class: 'big' }, `${theme.name.toUpperCase()}`),
+      h('h3', { class: 'accent' }, COURSES[course]!.toUpperCase()),
+      h('p', { class: 'hint' }, `"${theme.title}"`),
+      h('div', { class: 'foods small' }, ...items.map((i) =>
+        h('div', { class: 'food-tile static' }, spriteImg(sprite(FOOD_VIEW[i.kind].sprite), 3), h('span', { class: 'fname' }, i.name)))),
+      h('div', { class: 'roster' }, ...roster.map((k) => spriteImg(sprite(ENEMY_SPRITE[k]), 3))),
+      this.app.settings.tips ? h('p', { class: 'tip' }, pick(LOADING_TIPS)) : null,
+    ));
+  }
+
+  private showClear(): void {
+    const st = this.run.stage;
+    this.showOverlay(h('div', { class: 'panel' },
+      h('h2', { class: 'big good' }, 'COURSE CLEARED!'),
+      h('p', {}, `Time ${st.stats.time.toFixed(1)}s`),
+      h('p', {}, `Bonus +${fmt(this.lastBonus)}`),
+      h('p', { class: 'hint' }, `Stomachs left: ${st.stomachs}`),
+    ));
+  }
+
+  private showPerks(): void {
+    const cards = this.run.perkOffer.map((p, i) =>
+      h('button', { class: 'btn perk', type: 'button', onclick: () => this.pickPerk(i) },
+        h('b', {}, `${i + 1}. ${p.name}`), h('span', {}, p.desc)));
+    this.showOverlay(h('div', { class: 'panel' },
+      h('h2', { class: 'big' }, 'PICK A PERK'),
+      h('p', { class: 'hint' }, 'Mess committee approved. Choose one.'),
+      ...cards,
+    ));
+  }
+
+  private pickPerk(i: number): void {
+    const perk = this.run.perkOffer[i];
+    if (this.run.phase !== 'perk' || !perk) return;
+    sfx.click();
+    this.run.choosePerk(perk.id);
+  }
+
+  private togglePause(force?: boolean): void {
+    if (this.run.phase !== 'playing') return;
+    this.paused = force ?? !this.paused;
+    if (!this.paused) {
+      this.last = performance.now();
+      this.hideOverlay();
+      return;
+    }
+    const s = this.app.settings;
+    this.showOverlay(h('div', { class: 'panel' },
+      h('h2', { class: 'big' }, 'PLATE BREAK'),
+      h('p', { class: 'hint' }, 'The warden is also on a tea break.'),
+      button('RESUME', () => this.togglePause(false), 'primary'),
+      button(s.sound ? 'SOUND: ON' : 'SOUND: OFF', () => { this.app.toggleSetting('sound'); this.togglePause(true); }),
+      button(s.crt ? 'SCANLINES: ON' : 'SCANLINES: OFF', () => { this.app.toggleSetting('crt'); this.togglePause(true); }),
+      button(s.showPaths ? 'ENEMY PATHS: ON' : 'ENEMY PATHS: OFF', () => { this.app.toggleSetting('showPaths'); this.togglePause(true); }),
+      button(this.cfg.mode === 'daily' ? 'QUIT (counts as your daily run)' : 'QUIT', () => {
+        this.finalize();
+        this.app.goTitle();
+      }, 'ghost'),
+    ));
+  }
+
+  // ---------------------------------------------------------------- run end
+
+  /** Raw score times the difficulty multiplier (easy x0.75, hard x1.5), so ranks are comparable across levels. */
+  private finalScore(): number {
+    return Math.round(this.run.totalScore * LEVELS[this.level].score);
+  }
+
+  private finalize(): void {
+    if (this.finalized) return;
+    this.finalized = true;
+    const run = this.run;
+    const cfg = this.cfg;
+    const score = this.finalScore();
+    const before = new Set(this.app.profile.get().achievements);
+    this.app.profile.update((p) => {
+      p.runs++;
+      p.totalFood += run.totals.food;
+      if (cfg.mode === 'daily') {
+        p.daily[cfg.dateKey] = { date: cfg.dateKey, score, stages: run.stagesCleared, weekday: cfg.weekday, level: this.level };
+        p.bestScore = Math.max(p.bestScore, score);
+      } else {
+        p.practiceBest = Math.max(p.practiceBest, score);
+        const sm = new SkillModel(p.skill);
+        run.outcomes.forEach((o) => sm.record(o));
+        p.skill = sm.skill;
+      }
+      const earn = (id: string, ok: boolean) => ok && !p.achievements.includes(id) && p.achievements.push(id);
+      earn('first', true);
+      earn('immunity', run.phase === 'complete');
+      earn('maggi', run.totals.enemies >= 4);
+      earn('untouched', run.phase === 'complete' && run.totals.lives === 0);
+      if (cfg.mode === 'daily') {
+        earn('streak3', p.streak.current >= 3);
+        earn('streak7', p.streak.current >= 7);
+      }
+    });
+    this.unlocked = this.app.profile.get().achievements.filter((a) => !before.has(a));
+    if (cfg.mode === 'daily') {
+      const p = this.app.profile.get();
+      void this.app.board.submit({ name: p.nickname, score, stages: run.stagesCleared, streak: p.streak.current, date: cfg.dateKey });
+    }
+  }
+
+  private shareText(): string {
+    const run = this.run;
+    const p = this.app.profile.get();
+    const courses = [0, 1, 2].map((i) => (run.outcomes[i]?.cleared ? ['🍳', '🍛', '🌙'][i] : '💀')).join('');
+    const d = new Date(`${this.cfg.dateKey}T00:00:00Z`).toUTCString().slice(5, 11);
+    return [`MESSED UP - ${this.cfg.mode === 'daily' ? d : 'practice'}${this.level === 'normal' ? '' : ` (${LEVELS[this.level].label})`}`, `${fmt(this.finalScore())} pts ${courses}`, this.cfg.mode === 'daily' ? `🔥 ${p.streak.current} day streak` : '', location.origin]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private showEnd(): void {
+    const run = this.run;
+    const p = this.app.profile.get();
+    const won = run.phase === 'complete';
+    const rank = h('p', { class: 'hint' });
+    const countdown = h('span', { class: 'mono' }, formatCountdown(msUntilNextIstMidnight(Date.now())));
+    const copied = h('p', { class: 'hint' });
+
+    if (this.cfg.mode === 'daily') {
+      void this.app.board.top('daily', this.cfg.dateKey, 50).then((rows) => {
+        const i = rows.findIndex((r) => r.name === p.nickname);
+        rank.textContent = i >= 0 ? `RANK #${i + 1} TODAY (${this.app.board.source === 'online' ? 'community' : 'this device'})` : '';
+      });
+    }
+
+    const badges = this.unlocked.map((id) => ACHIEVEMENTS.find((a) => a.id === id)).filter(Boolean)
+      .map((a) => h('div', { class: 'unlock' }, `UNLOCKED: ${a!.name}`));
+
+    this.showOverlay(h('div', { class: 'panel end' },
+      h('h2', { class: `big ${won ? 'good' : 'bad'}` }, won ? `YOU SURVIVED ${WEEKDAY_NAMES[this.cfg.weekday]!.toUpperCase()}!` : pick(DEATH_LINES).toUpperCase()),
+      h('div', { class: 'final' }, fmt(this.finalScore())),
+      this.level === 'normal' ? null : h('p', { class: 'hint' }, `${fmt(run.totalScore)} base x ${LEVELS[this.level].score} (${LEVELS[this.level].label})`),
+      h('p', { class: 'hint' }, `${run.stagesCleared}/3 courses - ${run.totals.food} dishes - best combo ${run.totals.maxCombo}`),
+      this.cfg.mode === 'daily'
+        ? h('p', { class: 'hint' }, `${p.streak.current} day streak. Next menu in `, countdown)
+        : h('p', { class: 'hint' }, `Practice best ${fmt(p.practiceBest)}`),
+      rank, ...badges,
+      button('SHARE', async () => {
+        try {
+          await navigator.clipboard.writeText(this.shareText());
+          copied.textContent = 'COPIED! Paste it in the group chat.';
+        } catch {
+          copied.textContent = this.shareText();
+        }
+      }, 'primary'),
+      copied,
+      this.cfg.mode === 'practice' ? button('PLAY AGAIN', () => this.app.startPractice(this.cfg.weekday, { skipPreview: true })) : null,
+      button('HALL OF FAME', () => this.app.goHall()),
+      button('MENU', () => this.app.goTitle(), 'ghost'),
+    ));
+    if (won) sfx.clear();
+  }
+}

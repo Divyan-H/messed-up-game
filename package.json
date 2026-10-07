@@ -1,0 +1,28 @@
+{
+  "name": "messed-up",
+  "private": true,
+  "version": "1.0.0",
+  "description": "MESSED UP - a retro hostel-mess maze game with game AI (A*, FSM, PCG, adaptive difficulty)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "playtest": "tsx scripts/playtest.ts",
+    "snapshot": "tsx scripts/snapshot.ts",
+    "foodsheet": "tsx scripts/foodsheet.ts"
+  },
+  "dependencies": {
+    "@fontsource/press-start-2p": "^5.3.0"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.10",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3",
+    "vitest": "^5.0.3"
+  }
+}
