@@ -62,7 +62,7 @@ body {
   box-shadow: 0 0 0 2px var(--ink), 8px 8px 0 rgba(0, 0, 0, 0.55);
   padding: 3px;
 }
-#app[data-layout='wide'] .win { width: min(100%, calc(1000px * var(--ui))); height: min(100%, calc(720px * var(--ui))); }
+#app[data-layout='wide'] .win { width: 100%; height: 100%; }
 
 .titlebar {
   display: flex;

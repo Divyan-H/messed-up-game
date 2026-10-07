@@ -108,9 +108,10 @@ describe('responsive layout', () => {
     expect(computeLayout(820, 1180).layout).toBe('tall');
   });
 
-  it('scales the UI up on big screens, never below 1 or above 1.7, and applies the text-size setting', () => {
+  it('scales the UI up on big screens, never above 2.5, fitting the wide window to laptops, and applies the text-size setting', () => {
     expect(computeLayout(320, 480).ui).toBe(1);
-    expect(computeLayout(3840, 2160).ui).toBe(1.7);
+    expect(computeLayout(3840, 2160).ui).toBe(2.5);
+    expect(computeLayout(1366, 650).ui).toBeLessThan(1);
     expect(computeLayout(1920, 1080).ui).toBeGreaterThan(computeLayout(1366, 768).ui);
     expect(computeLayout(390, 844, 'large').ui).toBe(1.2);
     expect(computeLayout(390, 844, 'small').ui).toBe(0.9);
