@@ -1,147 +1,221 @@
-# MESSED UP - survive the week, skip the sambar
+# MESSED UP
 
-A retro pixel-art maze game about a hungry hostel student, built as a coursework project on **AI in games**.
-Eat the mess menu, dodge the dishes that chase you, escape through the exit, and come back tomorrow for the Daily Run.
+**Survive the week. Skip the sambar.**
 
-* Pure static front-end (TypeScript + Canvas, ~36 KB gzipped plus a 12 KB font, no image or audio files), so **free Vercel hosting just works**.
-* Optional community leaderboard through one Vercel Function + free Upstash Redis.
-* No login (dropped on purpose): a nickname, a per-device streak and an optional shared board.
+A retro pixel-art maze game about a hungry hostel student. Eat the day's mess menu, dodge the dishes that chase you, escape through the exit, and come back tomorrow for the Daily Run. It runs in any modern browser, on phones, tablets and desktops, with no install and no login.
 
-![title](docs/screens/title.png)
+**Play it:** https://messed-up-game.vercel.app
 
-## Run it
+![Title screen](docs/screens/title.png)
+
+## Contents
+
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+- [How to play](#how-to-play)
+- [Game AI](#game-ai)
+- [Architecture](#architecture)
+- [Testing](#testing)
+- [Deployment and CI/CD](#deployment-and-cicd)
+- [Leaderboard](#leaderboard)
+- [Known limitations](#known-limitations)
+- [Credits](#credits)
+
+## Features
+
+- **Daily Run**: one ranked attempt per day (IST), the same mazes for everyone, with a streak system and Streak Freezes.
+- **Practice mode**: any weekday, random maze, unlimited tries, adaptive difficulty.
+- **Seven days, seven themes**: each weekday has its own menu, enemy line-up, difficulty and dining-hall look, from gentle Monday to brutal Sunday.
+- **Easy / Normal / Hard**: scale enemy speed, number of dishes, lives and score multiplier. Scores are normalised so Daily ranks stay comparable.
+- **Procedurally generated dining hall**: furniture-based layouts that are always connected and free of dead-end traps.
+- **Game AI**: A* chasers, an ambusher, a wanderer, a finite-state-machine boss, adaptive difficulty and a bot playtester. See [Game AI](#game-ai).
+- **Responsive, no-scroll UI**: every menu page is laid out in columns and scaled to fit the screen, so nothing scrolls. In-game, the maze and HUD rearrange for portrait and landscape.
+- **Touch, keyboard and swipe controls**, with a large on-screen d-pad whose position can be switched for one-handed play.
+- **First-run guided tour** in the game screen that points out the player, enemies, dishes, exit and HUD. It can be skipped, and replayed from the `?` button.
+- **Accessibility and comfort options**: high contrast, clear font, three text sizes, reduced motion, CRT effect toggle, vibration toggle, adjustable volume.
+- **Community leaderboard** (optional) backed by Upstash Redis, with an automatic per-device fallback.
+- **Tiny footprint**: no image or audio files. Art is defined as text and drawn to canvas, sound is synthesised with WebAudio. The production JavaScript bundle is about 100 kB (37 kB gzipped).
+
+## Tech stack
+
+| Area | Choice |
+|---|---|
+| Language | TypeScript (strict) |
+| Rendering | HTML5 Canvas 2D, pre-rendered sprites and an offscreen static layer |
+| Build / dev server | Vite |
+| Tests | Vitest |
+| Audio | WebAudio synthesiser |
+| Backend (optional) | One Vercel Function plus Upstash Redis (REST) |
+| Hosting | Vercel |
+| CI/CD | GitHub Actions |
+
+## Getting started
+
+Requires **Node.js 22** (the version CI uses) or newer.
 
 ```bash
-npm install
-npm run dev          # http://localhost:5173
-npm test             # 43 unit tests
-npm run build        # typecheck + production build into dist/
-npm run playtest 20  # headless bot plays 20 runs per weekday and prints clear rates
-npm run snapshot     # renders PNG frames with the real renderer (output in ./snapshots)
-npm run foodsheet    # labelled contact sheet of every dish sprite (docs/screens/food-sheet.png)
+git clone https://github.com/Divyan-H/messed-up-game.git
+cd messed-up-game
+npm ci
+npm run dev        # http://localhost:5173
 ```
 
-Handy URL flags: `/?autopilot` lets the bot play (great for demos), `/?autopilot&sim=4` runs it 4x faster.
+### Scripts
 
-## Deploy to Vercel (free)
-
-1. Push this folder to a GitHub repo.
-2. vercel.com -> Add New Project -> import the repo. Vercel detects **Vite** automatically (build `npm run build`, output `dist`). Click Deploy.
-3. *Optional, for a community leaderboard:* in the project, Storage -> add the **Upstash Redis** integration from the Marketplace. It injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; redeploy. Without it the game still works and silently uses the per-device board.
-
-## The look: a furnished mess dining hall, not a maze
-
-There is no corridor maze. The hall is *furnished*: separate sets of tables and chairs in different sizes (two-tops, pairs, family and long tables, big tables with six chairs, a round table ringed by stools), booths pushed against the side walls, buffet counters, planters, crates and rice sacks, with aisles of floor between them. What you bump into is the footprint of that furniture. Tables are gingham-clothed or bare wood with place settings, chairs face their table, the top wall is a serving counter, the outer walls are wooden wainscot with brass lamps, and the floor is vertical boards with a red rug under the kitchen where the dishes spawn. A back wall has wallpaper, windows, a menu board and glass cabinets. Each weekday re-dresses the hall (floor stain, tablecloth colour, wallpaper). Dishes are served on plates, characters cast soft shadows, and warm lamp light plus a vignette is baked into the static layer, so the whole scene costs one `drawImage` per frame.
-
-Code: `src/game/furniture.ts` (layout generator), `src/render/hall.ts` (scene painter, floor, furniture, lighting), `src/render/decorArt.ts` (props), `THEMES` in `src/game/config.ts`. Gameplay only ever sees the wall mask, so pathfinding, enemy AI, replays and the leaderboard work unchanged. A test checks that furniture stays clearly lighter than the floor on every day.
-
-![hall](docs/screens/hall-monday.png)
-
-## Screens, settings and responsive layouts
-
-| Screen | What it does |
+| Command | Description |
 |---|---|
-| **Menu card** | Shown before every run: the day's dishes as pixel icons (tap one for a joke), bonus snack, Maggi, the enemies to avoid, and a quick Easy / Normal / Hard picker. The daily attempt is only used up when you press START. |
-| **Settings** | Difficulty, adaptive AI, enemy-path overlay, hint ticker, menu card on/off; CRT scanlines, high contrast, pixel or clear font, text size S/M/L, maze scaling (auto / fill / crisp), particles (full / low / off), reduce motion, FPS counter; on-screen pad (auto / on / off) and its position (left / mid / right), vibration; sound and volume. Everything saves on the device and applies instantly. |
-| **Pause** | Quick toggles for sound, scanlines and enemy paths. |
+| `npm run dev` | Start the Vite dev server |
+| `npm run build` | Typecheck, then build to `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run typecheck` | Run the TypeScript compiler without emitting |
+| `npm test` | Run the unit tests |
+| `npm run playtest [n]` | Headless bot plays `n` runs per weekday and prints clear rates |
+| `npm run snapshot` | Render PNG frames with the real renderer into `./snapshots` |
+| `npm run foodsheet` | Render a labelled contact sheet of every dish sprite |
 
-**Difficulty levels** (set in Settings or on the menu card): Easy gives 4 stomachs, slower dishes, a longer Maggi and no boss, with score x0.75. Hard gives faster dishes, quicker releases, a shorter Maggi and an extra enemy, with score x1.5. The final score is multiplied, so Daily ranks stay comparable, and the maze is the same for everyone at every level. Level is part of the run config, so replays stay deterministic.
+### URL flags
 
-**Responsive layout** (`src/ui/layout.ts`, pure and tested): a UI scale (1 on phones up to 1.7 on large monitors, times the text-size setting) drives all text and window sizes. Portrait screens stack HUD, maze and pad; landscape screens (phones on their side, laptops, desktops) put the maze on the left and the HUD, hints and pad in a side column. Checked in a headless browser at 360x640, 390x844, 844x390, 820x1180, 1366x768 and 1920x1080 with no horizontal overflow.
+| Flag | Effect |
+|---|---|
+| `/?autopilot` | The bot plays the game (good for demos) |
+| `/?autopilot&sim=4` | Same, with the simulation running 4x faster |
 
-![menu card](docs/screens/menu-card.png)
-![settings](docs/screens/settings.png)
-![desktop](docs/screens/gameplay.png)
+## How to play
 
-## How the game works
+**Goal:** eat every dish to open the exit, then reach it. A day has three courses: Breakfast, Lunch and Dinner.
+
+**Controls:** arrow keys or WASD, swipe on the maze, or the on-screen pad. `P` or `Esc` pauses. You keep moving in your chosen direction until you turn.
 
 | Thing | Rule |
 |---|---|
-| Goal | Eat every dish to open the exit, then reach it. 3 courses per day: Breakfast, Lunch, Dinner. |
-| Lives | 3 stomachs. Touching an enemy costs one. A hunger bar drains and refills when you eat; at zero you lose a stomach. |
-| Points | Dish +10 (combo up to x5), bonus snack +100, Maggi power-up lets you eat enemies for 200/400/800/1600, clear bonus for time and stomachs. |
-| Warden | Stop eating for 13 s and he appears and hunts you. |
-| Perks | After each course pick 1 of 3 (speed, extra stomach, longer Maggi, longer combo, see enemy paths). |
-| Daily Run | One ranked attempt per IST day, same mazes for everyone, resets at midnight IST. Streak +1 per day played. |
-| Streak Freeze | Every 7th streak day earns one (max 2); it forgives exactly one missed day. |
+| Lives | Start with 3 stomachs (Easy: 4). Touching a chaser costs one. |
+| Hunger | A hunger bar drains over time and refills when you eat. At zero you lose a stomach. |
+| Points | Dish +10 (combo up to x5), bonus snack +100, clear bonus for time and remaining stomachs. |
+| Outside Maggi | A power-up that scares every chaser. Eat them for 200, 400, 800 and 1600. |
+| Warden | Stop eating for too long and the Warden appears and hunts you. |
+| Perks | After each course, choose 1 of 3 (speed, extra stomach, longer Maggi, longer combo, see enemy paths). |
+| Daily Run | One ranked attempt per IST day. The attempt is only consumed when you press START. |
+| Streaks | +1 per day played. Every 7th day earns a Streak Freeze (max 2) that forgives one missed day. |
 | Practice | Unlimited, any weekday, random maze, adaptive difficulty, no streak or ranking. |
-| Difficulty | Monday (easiest) to Sunday (hardest): more enemies, faster enemies, quicker releases. Menu and level names come from the real SRM mess menu. You can also pick Easy / Normal / Hard (see above). |
-| Food art | Every dish on the trimmed SRM menu has its own 12x12 pixel sprite (`src/render/foodArt.ts`), drawn as text with shading. |
 
-## AI in games: what to present
+### Difficulty
 
-| Module | Technique | Where in code |
+Each weekday gets harder (more and faster enemies, quicker releases). On top of that you can choose a level in **Settings** or on the menu card:
+
+| Level | Effect | Score |
 |---|---|---|
-| Chasing enemy (Sambar Blob) | **A\*** with Manhattan heuristic on a binary min-heap | `src/game/pathfinding.ts`, `enemies.ts` |
-| Ambusher (Mystery Curry) | Target prediction: aims 4 tiles ahead of the player's heading | `enemies.ts` (`ambush`) |
-| Wanderer (Chapati Ghost) | Stochastic movement (seeded RNG) | `enemies.ts` (`wander`) |
-| Moody boss (Wednesday Special) | **Finite state machine**: PATROL <-> CHASE with hysteresis; all enemies share DEN/ACTIVE/SCARED/EATEN modes | `enemies.ts` (`moody`) |
-| Level generation | **Procedural content generation** by constraint-based placement: furniture sets are dropped on the floor by rejection sampling (must fit, stay clear of the kitchen/start/corners, keep an aisle unless flush to a wall, never split the floor, checked by flood fill). Dead ends are plugged with clutter, and trap pockets are found with **Tarjan's articulation-point algorithm** and plugged or re-rolled. Then exit/Maggi/food placement. Every hall is verified connected | `src/game/furniture.ts`, `src/game/maze.ts` |
-| Adaptive difficulty | **Dynamic difficulty adjustment**: exponential moving average of player performance scales enemy speed (Practice only, so Daily stays fair) | `src/game/difficulty.ts` |
-| Bot playtester | Danger-weighted **Dijkstra** agent with momentum and target hysteresis; measures balance without human testers | `src/game/bot.ts`, `scripts/playtest.ts` |
-| Determinism / anti-cheat basis | Fixed 60 Hz simulation + seeded RNG: the same inputs always give the same run; `replayRun` proves it | `src/game/run.ts`, test "run determinism" |
+| Easy | Slower enemies, fewer dishes, 4 stomachs, longer Maggi, no boss | x0.75 |
+| Normal | The intended experience | x1 |
+| Hard | Faster enemies, more dishes, quicker releases, shorter Maggi, hungrier player | x1.5 |
 
-The in-game **AI LAB** screen runs these live: pathfinding benchmark, bot playtest, record-and-replay determinism check, and shows the adaptive-difficulty state. A "Show enemy paths" toggle draws every enemy's planned A\* route over the maze.
+The maze is the same for everyone at every level, and the level is part of the run configuration, so replays stay deterministic.
 
-### Measured results (copy these into your report, then re-run for your own numbers)
+![Menu card](docs/screens/menu-card.png)
+![Gameplay](docs/screens/gameplay.png)
 
-Pathfinding on today's maze (AI Lab, 400 random start/goal pairs): A\* expanded about 42 nodes per search against about 104 for Dijkstra and BFS, with identical path lengths (all are optimal on a uniform grid).
+## Game AI
 
-Bot playtest (`npm run playtest 24`, 24 full runs per weekday). The bot is a simple floor, humans do better, but the curve shows the intended ramp:
+The game is built around classic game-AI techniques.
 
-| Day | Breakfast cleared | Lunch cleared | Dinner cleared | Full run cleared |
-|---|---|---|---|---|
-| Monday | 88% | 76% | 75% | 50% |
-| Tuesday | 83% | 55% | 45% | 21% |
-| Wednesday | 46% | 73% | 50% | 17% |
-| Thursday | 71% | 41% | 14% | 4% |
-| Friday | 54% | 54% | 29% | 8% |
-| Saturday | 46% | 36% | 25% | 4% |
-| Sunday | 38% | 22% | 0% | 0% |
+| Module | Technique | Code |
+|---|---|---|
+| Chaser (Sambar Blob) | **A\*** with a Manhattan heuristic on a binary min-heap | `src/game/pathfinding.ts`, `src/game/enemies.ts` |
+| Ambusher (Mystery Curry) | Target prediction: aims several tiles ahead of the player's heading | `src/game/enemies.ts` |
+| Wanderer (Chapati Ghost) | Stochastic movement from a seeded RNG | `src/game/enemies.ts` |
+| Boss (Wednesday Special) | **Finite state machine**, PATROL and CHASE with hysteresis. All enemies share DEN, ACTIVE, SCARED and EATEN modes | `src/game/enemies.ts` |
+| Level generation | **Procedural content generation**: furniture sets placed by constrained rejection sampling, a flood-fill connectivity check, and dead-end and trap-pocket removal using **Tarjan's articulation points** | `src/game/furniture.ts`, `src/game/maze.ts` |
+| Adaptive difficulty | **Dynamic difficulty adjustment**: an exponential moving average of player performance scales enemy speed in Practice (Daily stays fixed so rankings are fair) | `src/game/difficulty.ts` |
+| Bot playtester | Danger-weighted **Dijkstra** agent used to measure balance without human testers | `src/game/bot.ts`, `scripts/playtest.ts` |
+| Determinism | Fixed 60 Hz simulation and a seeded RNG: the same inputs always produce the same run, and `replayRun` verifies it | `src/game/run.ts` |
 
-Difficulty levels (bot, 20 full runs per cell, seeds 900+; Wednesday normal vs hard is within sampling noise at this sample size):
+The in-game **AI Lab** screen exposes these live: a pathfinding benchmark (A\* vs Dijkstra vs BFS), a bot playtest, a record-and-replay determinism check and the adaptive-difficulty state. A "Show enemy paths" setting draws every enemy's planned A\* route over the maze.
 
-| Day | Easy full-run | Normal full-run | Hard full-run | Avg courses cleared (easy / normal / hard) |
-|---|---|---|---|---|
-| Monday | 95% | 70% | 10% | 2.95 / 2.40 / 1.10 |
-| Wednesday | 55% | 10% | 5% | 2.25 / 0.90 / 0.65 |
-| Sunday | 55% | 5% | 0% | 2.25 / 0.50 / 0.25 |
+To get current balance numbers after any tuning change, run:
 
-Suggested experiments with real players from your college: adaptive on vs off (survival rate and retries), time per course by weekday, and which enemy causes the most deaths.
+```bash
+npm run playtest 20
+```
 
-![AI paths](docs/screens/ai-paths-overlay.png)
+![Enemy paths](docs/screens/ai-paths-overlay.png)
 
-## Architecture and design principles
+## Architecture
 
 ```
 src/
-  core/      pure utilities: seeded RNG, IST clock, min-heap, safe storage
-  game/      the simulation. NO DOM, NO Math.random, NO wall-clock time
-             config, menu, maze (PCG), pathfinding, mover, enemies (AI), stage, run, perks, difficulty, bot
-  render/    canvas renderer, pixel art defined as text, particles/popups
-  audio/     WebAudio synth (no audio files)
-  services/  streak rules, profile (localStorage), leaderboard (strategy + fallback)
-  ui/        DOM screens, game view, input
-api/         leaderboard.ts - Vercel Function (Redis sorted sets)
-tests/       43 unit tests
-scripts/     headless playtest + PNG snapshot renderer
+  core/      Pure utilities: seeded RNG, IST clock, min-heap, safe storage
+  game/      The simulation. No DOM, no Math.random, no wall-clock time
+             config, menu, maze (PCG), pathfinding, mover, enemies (AI),
+             stage, run, perks, difficulty, bot
+  render/    Canvas renderer, text-defined pixel art, hall painter, particles
+  audio/     WebAudio synthesiser (no audio files)
+  services/  Streak rules, profile (localStorage), leaderboard providers
+  ui/        App shell, screens, game view, input, layout and fit engine, tour
+api/         leaderboard.ts: Vercel Function (Redis sorted sets)
+tests/       Unit tests
+scripts/     Headless playtest and PNG snapshot tools
 ```
 
-* **Separation of simulation and presentation.** `src/game` runs headless, which is what makes bot playtesting, unit tests, replay and server-side verification possible. The UI only reads state and consumes an event queue.
-* **Fixed timestep (60 Hz) with a free-running renderer.** Same behaviour on 60/120/144 Hz screens and on slow phones.
-* **Performance.** Maze drawn once to an offscreen canvas; sprites pre-rendered; pooled particles; typed arrays; A\* allocates nothing per search and only runs when an enemy reaches a tile centre with a real choice. HUD touches the DOM only when a value changes.
-* **Patterns used.** Strategy (enemy behaviours, leaderboard providers), State machine (enemy modes, run phases), Adapter/Fallback (remote -> local board), Observer-style event queue, Factory seam for canvas (renderer also runs under node).
-* **Pure, tested rules.** Streak logic, difficulty model, maze guarantees, pathfinding optimality and determinism each have tests.
+Key design decisions:
 
-## Honest limitations
+- **Simulation is separate from presentation.** `src/game` runs headless, which is what makes bot playtesting, unit tests and replays possible. The UI only reads state and consumes an event queue.
+- **Fixed timestep (60 Hz) with a free-running renderer.** Behaviour is identical on 60, 120 and 144 Hz screens and on slow phones.
+- **Cheap rendering.** The dining hall is drawn once to an offscreen canvas, sprites are pre-rendered, particles are pooled and the HUD only touches the DOM when a value changes.
+- **Fit-to-screen menu pages.** `src/ui/layout.ts` lays each menu page out at several candidate widths, picks the one that scales up best for the viewport, and applies a uniform scale. Wide screens show every card at once; portrait phones get tabs. In-game overlays shrink instead of scrolling.
+- **Patterns used.** Strategy (enemy behaviours, leaderboard providers), state machines (enemy modes, run phases), adapter and fallback (remote board to local board), an event queue between simulation and UI.
 
-* **No accounts.** Names are self-chosen; the daily-attempt lock and streak live in the browser's localStorage, so a determined player can clear storage and replay, and the community board trusts submitted scores (the API validates ranges, names and dates, nothing more).
-* **Anti-cheat roadmap.** Because runs are deterministic, the client could upload its input log (`run.log`) and the server could re-simulate with `replayRun` and reject mismatches. The simulation is ready for that; the upload and server verification are not built.
-* The Vercel API route and Upstash storage are written to Upstash's REST API but were **not exercised against a live Redis** here. Deploy and test it once with a real score before relying on it. The in-browser fallback is tested.
-* Audio is synthesized and was not listened to in an automated check.
+## Testing
 
-## Report outline (suggested)
+```bash
+npm test
+```
 
-1. Introduction and motivation (community game, retention loop). 2. Survey of game AI (pathfinding, FSMs, PCG, DDA). 3. System design (layers above, free-tier deployment). 4. Each AI module with complexity: A\* O(E log V) per search, DFS maze O(V), BFS validation O(V), DDA O(1) update. 5. Experiments (tables above, plus your player data). 6. Limitations and future work (replay verification, learned enemy policies, accounts). 7. Conclusion.
+The suite covers the seeded RNG and heap, pathfinding optimality and equivalence, maze and furniture guarantees (connectivity, no dead-end traps, clear aisles), enemy behaviour, run determinism and replay, streak rules, the difficulty model, profile sanitisation, layout and fit calculations, and sprite and menu coverage. The same suite runs in CI on every push and pull request.
 
-Mess menu data adapted from the SRM IST hostel mess menu (w.e.f. 23.03.2026). All art is original pixel art generated from text in `src/render/art.ts`.
+## Deployment and CI/CD
+
+The site is deployed on Vercel. A GitHub Actions workflow (`.github/workflows/deploy.yml`) handles both checks and deployment:
+
+| Event | What runs |
+|---|---|
+| Pull request to `main` | Typecheck, tests, production build |
+| Push to `main` | The same checks, then a production deploy to Vercel |
+
+So merging or pushing to `main` updates the live site automatically.
+
+### Setup for your own fork
+
+1. Create a Vercel project for the repository and link it locally with `npx vercel link`. The IDs are then in `.vercel/project.json`.
+2. Create a token at https://vercel.com/account/tokens.
+3. Add these repository secrets (Settings, Secrets and variables, Actions):
+
+   | Secret | Value |
+   |---|---|
+   | `VERCEL_TOKEN` | The token from step 2 |
+   | `VERCEL_ORG_ID` | `orgId` from `.vercel/project.json` |
+   | `VERCEL_PROJECT_ID` | `projectId` from `.vercel/project.json` |
+
+4. Push to `main`.
+
+Security headers and long-lived asset caching are configured in `vercel.json`.
+
+## Leaderboard
+
+The community leaderboard is optional. Without it, the game works fully and uses a per-device board.
+
+1. In your Vercel project, add the **Upstash Redis** integration from the Marketplace.
+2. It injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (`KV_REST_API_URL` and `KV_REST_API_TOKEN` are also accepted).
+3. Redeploy.
+
+The API (`api/leaderboard.ts`) validates score range, nickname format and dates before writing. Until the variables are set it answers `503` and the client falls back to the local board automatically.
+
+## Known limitations
+
+- **No accounts.** Nicknames are self-chosen. The daily-attempt lock and streak live in the browser's `localStorage`, so clearing storage allows another attempt, and the shared board trusts submitted scores within the API's validation limits.
+- **Anti-cheat is not built yet.** Runs are deterministic, so a future version can upload the input log and re-simulate it on the server with `replayRun`. The simulation is ready for this; the upload and verification are not.
+- **Leaderboard storage has not been load-tested** against a live Redis instance.
+- Audio is synthesised and has not been covered by automated checks.
+
+## Credits
+
+Mess menu data adapted from the SRM IST hostel mess menu (w.e.f. 23.03.2026). All art is original pixel art generated from text in `src/render/art.ts` and related files. The pixel font is [Press Start 2P](https://fonts.google.com/specimen/Press+Start+2P) via Fontsource.
