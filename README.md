@@ -2,7 +2,7 @@
 
 **Survive the week. Skip the sambar.**
 
-A retro pixel-art maze game about a hungry hostel student. Eat the day's mess menu, dodge the dishes that chase you, escape through the exit, and come back tomorrow for the Daily Run. It runs in any modern browser, on phones, tablets and desktops, with no install and no login.
+A retro pixel-art maze game about a hungry hostel student. Eat the day's mess menu, dodge the dishes that chase you, escape through the exit, and come back tomorrow for the Daily Run. It runs in any modern browser, on phones, tablets and desktops, with no install. Practice is open to everyone; sign in with Google to play the ranked Daily Run.
 
 **Play it:** https://messed-up-game.vercel.app
 
@@ -18,13 +18,14 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 - [Architecture](#architecture)
 - [Testing](#testing)
 - [Deployment and CI/CD](#deployment-and-cicd)
-- [Leaderboard](#leaderboard)
+- [Accounts and ranked play](#accounts-and-ranked-play)
 - [Known limitations](#known-limitations)
 - [Credits](#credits)
 
 ## Features
 
-- **Daily Run**: one ranked attempt per day (IST), the same mazes for everyone, with a streak system and Streak Freezes.
+- **Daily Run**: one ranked attempt per Google account per day (IST), the same secret mazes for everyone, with streaks and Streak Freezes.
+- **Server-verified scores**: the server replays each run's inputs through the same deterministic simulation and records the score that replay produces. Scores sent by the client are never trusted.
 - **Practice mode**: any weekday, random maze, unlimited tries, adaptive difficulty.
 - **Seven days, seven themes**: each weekday has its own menu, enemy line-up, difficulty and dining-hall look, from gentle Monday to brutal Sunday.
 - **Easy / Normal / Hard**: scale enemy speed, number of dishes, lives and score multiplier. Scores are normalised so Daily ranks stay comparable.
@@ -34,7 +35,7 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 - **Touch, keyboard and swipe controls**, with a large on-screen d-pad whose position can be switched for one-handed play.
 - **First-run guided tour** in the game screen that points out the player, enemies, dishes, exit and HUD. It can be skipped, and replayed from the `?` button.
 - **Accessibility and comfort options**: high contrast, clear font, three text sizes, reduced motion, CRT effect toggle, vibration toggle, adjustable volume.
-- **Community leaderboard** (optional) backed by Upstash Redis, with an automatic per-device fallback.
+- **Community leaderboard**: today, all-time and best streaks, with unique moderated nicknames, backed by Upstash Redis.
 - **Tiny footprint**: no image or audio files. Art is defined as text and drawn to canvas, sound is synthesised with WebAudio. The production JavaScript bundle is about 100 kB (37 kB gzipped).
 
 ## Tech stack
@@ -46,7 +47,8 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 | Build / dev server | Vite |
 | Tests | Vitest |
 | Audio | WebAudio synthesiser |
-| Backend (optional) | One Vercel Function plus Upstash Redis (REST) |
+| Backend | One Vercel Function (bundled from `server/`) plus Upstash Redis (REST) |
+| Sign-in | Google Identity Services; ID tokens verified on the server, no auth library |
 | Hosting | Vercel |
 | CI/CD | GitHub Actions |
 
@@ -58,23 +60,32 @@ Requires **Node.js 22** (the version CI uses) or newer.
 git clone https://github.com/Divyan-H/messed-up-game.git
 cd messed-up-game
 npm ci
-npm run dev        # http://localhost:5173
+npm run dev:api    # local API on :8787 (in-memory Redis unless Upstash env vars are set)
+npm run dev        # http://localhost:5173 (proxies /api to the local API)
 ```
+
+Practice works with `npm run dev` alone. Real Google sign-in works locally once `http://localhost:5173` is an authorised JavaScript origin of the OAuth client.
 
 ### Scripts
 
 | Command | Description |
 |---|---|
 | `npm run dev` | Start the Vite dev server |
-| `npm run build` | Typecheck, then build to `dist/` |
+| `npm run dev:api` | Start the local API server (see above) |
+| `npm run build` | Typecheck, build the site to `dist/` and the API to `api/game.js` |
+| `npm run build:api` | Rebuild only the API bundle `api/game.js` (commit the result) |
+| `npm run serve:prod` | Pre-deploy check: serve `dist/` with the production security headers and the real API bundle |
 | `npm run preview` | Serve the production build locally |
 | `npm run typecheck` | Run the TypeScript compiler without emitting |
 | `npm test` | Run the unit tests |
 | `npm run playtest [n]` | Headless bot plays `n` runs per weekday and prints clear rates |
 | `npm run snapshot` | Render PNG frames with the real renderer into `./snapshots` |
 | `npm run foodsheet` | Render a labelled contact sheet of every dish sprite |
+| `npm run admin -- <command>` | Moderate the live leaderboard (see [Moderation](#moderation)) |
 
-### URL flags
+### URL flags (Practice only)
+
+The ranked Daily Run ignores these.
 
 | Flag | Effect |
 |---|---|
@@ -95,7 +106,7 @@ npm run dev        # http://localhost:5173
 | Outside Maggi | A power-up that scares every chaser. Eat them for 200, 400, 800 and 1600. |
 | Warden | Stop eating for too long and the Warden appears and hunts you. |
 | Perks | After each course, choose 1 of 3 (speed, extra stomach, longer Maggi, longer combo, see enemy paths). |
-| Daily Run | One ranked attempt per IST day. The attempt is only consumed when you press START. |
+| Daily Run | Sign in with Google. One ranked attempt per account per IST day, on any device. The attempt is used when you press START; if you leave mid-run, what you played so far is submitted. |
 | Streaks | +1 per day played. Every 7th day earns a Streak Freeze (max 2) that forgives one missed day. |
 | Practice | Unlimited, any weekday, random maze, adaptive difficulty, no streak or ranking. |
 
@@ -105,11 +116,11 @@ Each weekday gets harder (more and faster enemies, quicker releases). On top of 
 
 | Level | Effect | Score |
 |---|---|---|
-| Easy | Slower enemies, fewer dishes, 4 stomachs, longer Maggi, no boss | x0.75 |
+| Easy | Slower enemies, fewer dishes, 4 stomachs, longer Maggi, no boss | x0.6 |
 | Normal | The intended experience | x1 |
-| Hard | Faster enemies, more dishes, quicker releases, shorter Maggi, hungrier player | x1.5 |
+| Hard | Faster enemies, more dishes, quicker releases, shorter Maggi, hungrier player | x1.2 |
 
-The maze is the same for everyone at every level, and the level is part of the run configuration, so replays stay deterministic.
+The multipliers were tuned with the bot so no level is the obvious choice for ranking: average scores are close across levels, and Hard has the highest ceiling. Everyone gets the same layout for the day; the level is part of the run configuration, so replays stay deterministic. In the Daily Run, enemy paths are only shown by the Hostel Hack perk.
 
 ![Menu card](docs/screens/menu-card.png)
 ![Gameplay](docs/screens/gameplay.png)
@@ -149,11 +160,15 @@ src/
              stage, run, perks, difficulty, bot
   render/    Canvas renderer, text-defined pixel art, hall painter, particles
   audio/     WebAudio synthesiser (no audio files)
-  services/  Streak rules, profile (localStorage), leaderboard providers
-  ui/        App shell, screens, game view, input, layout and fit engine, tour
-api/         leaderboard.ts: Vercel Function (Redis sorted sets)
-tests/       Unit tests
-scripts/     Headless playtest and PNG snapshot tools
+  services/  Account (signed-in player), API client, streak rules, nickname rules,
+             profile (local settings and practice stats), leaderboard reads
+  ui/        App shell, screens, game view, input, layout and fit engine, tour, Google button
+server/      The API: Google token check, sessions, Daily start/finish with replay
+             verification, leaderboards, moderation, rate limits (bundled into api/)
+api/         game.js: the generated Vercel Function (do not edit; run npm run build:api)
+public/      privacy.html
+tests/       Unit and API tests
+scripts/     Local API server, admin tool, headless playtest, PNG snapshot tools
 ```
 
 Key design decisions:
@@ -162,7 +177,9 @@ Key design decisions:
 - **Fixed timestep (60 Hz) with a free-running renderer.** Behaviour is identical on 60, 120 and 144 Hz screens and on slow phones.
 - **Cheap rendering.** The dining hall is drawn once to an offscreen canvas, sprites are pre-rendered, particles are pooled and the HUD only touches the DOM when a value changes.
 - **Fit-to-screen menu pages.** `src/ui/layout.ts` lays each menu page out at several candidate widths, picks the one that scales up best for the viewport, and applies a uniform scale. Wide screens show every card at once; portrait phones get tabs. In-game overlays shrink instead of scrolling.
-- **Patterns used.** Strategy (enemy behaviours, leaderboard providers), state machines (enemy modes, run phases), adapter and fallback (remote board to local board), an event queue between simulation and UI.
+- **Server-authoritative ranked play.** The server owns the date, the daily maze seed (derived from a secret), the one-attempt lock, streaks and scores. The client only sends inputs.
+- **One function, no runtime dependencies.** `server/` and the simulation are bundled into a single ES module, so the deployed function has nothing to install and the server replays runs with exactly the code the browser ran.
+- **Patterns used.** Strategy (enemy behaviours), state machines (enemy modes, run phases), an event queue between simulation and UI, observer (account changes re-draw the title screen).
 
 ## Testing
 
@@ -170,7 +187,9 @@ Key design decisions:
 npm test
 ```
 
-The suite covers the seeded RNG and heap, pathfinding optimality and equivalence, maze and furniture guarantees (connectivity, no dead-end traps, clear aisles), enemy behaviour, run determinism and replay, streak rules, the difficulty model, profile sanitisation, layout and fit calculations, and sprite and menu coverage. The same suite runs in CI on every push and pull request.
+The suite covers the seeded RNG and heap, pathfinding optimality and equivalence, maze and furniture guarantees (connectivity, no dead-end traps, clear aisles), enemy behaviour, run determinism and replay, streak rules, the difficulty model, profile sanitisation, layout and fit calculations, and sprite and menu coverage.
+
+The API tests (`tests/server.test.ts`) run the real handler against an in-memory Redis and RSA-signed test tokens: sign-in and every token rejection case, CSRF and rate limits, nickname rules, the one-attempt lock, replay-verified scoring of full and quit runs (played by the bot), forged scores, too-fast submissions, expiry, streaks across days, and leaderboard caching rules. The same suite runs in CI on every push and pull request.
 
 ## Deployment and CI/CD
 
@@ -178,7 +197,7 @@ The site is deployed on Vercel. A GitHub Actions workflow (`.github/workflows/de
 
 | Event | What runs |
 |---|---|
-| Pull request to `main` | Typecheck, tests, production build |
+| Pull request to `main` | Typecheck, tests, production build, and a check that `api/game.js` matches its source |
 | Push to `main` | The same checks, then a production deploy to Vercel |
 
 So merging or pushing to `main` updates the live site automatically.
@@ -197,23 +216,59 @@ So merging or pushing to `main` updates the live site automatically.
 
 4. Push to `main`.
 
-Security headers and long-lived asset caching are configured in `vercel.json`.
+Routing for the API, security headers (including a strict Content Security Policy) and long-lived asset caching are configured in `vercel.json`. GitHub Actions are pinned to commit SHAs and the Vercel CLI to a fixed version.
 
-## Leaderboard
+## Accounts and ranked play
 
-The community leaderboard is optional. Without it, the game works fully and uses a per-device board.
+Practice needs nothing. The Daily Run, streaks and the leaderboard need two one-time setup steps.
 
-1. In your Vercel project, add the **Upstash Redis** integration from the Marketplace.
-2. It injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (`KV_REST_API_URL` and `KV_REST_API_TOKEN` are also accepted).
-3. Redeploy.
+### Setup
 
-The API (`api/leaderboard.ts`) validates score range, nickname format and dates before writing. Until the variables are set it answers `503` and the client falls back to the local board automatically.
+1. **Google sign-in.** In the Google Cloud console, create an OAuth client of type *Web application* and add the site's origins (for example `https://messed-up-game.vercel.app` and `http://localhost:5173`) as **Authorised JavaScript origins**. The client ID is in `src/services/authConfig.ts` (it is public by design); override it on the server with `GOOGLE_CLIENT_ID` if needed.
+2. **Database.** In the Vercel project, add the **Upstash Redis** integration from the Marketplace. It injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (`KV_REST_API_URL` / `KV_REST_API_TOKEN` also work). Pick the same region as the function: it runs in Mumbai (`bom1`, set in `vercel.json`). Redeploy afterwards.
+3. *Optional:* set `SESSION_SECRET` to a long random string. Without it, a key is derived from the Redis token.
+
+Until the database is connected the API answers `503`, and the game shows "Ranked play is offline" while Practice keeps working.
+
+### How it works
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/me` | Current player (or none), server time and today's status |
+| `PATCH /api/me` | Change nickname (unique, moderated, rate-limited) |
+| `POST /api/auth` / `DELETE /api/auth` | Sign in with a Google ID token / sign out |
+| `POST /api/daily/start` | Use today's attempt and receive the day's maze seed |
+| `POST /api/daily/finish` | Submit the run's inputs; the server replays them and records the score |
+| `GET /api/leaderboard?board=daily\|alltime\|streak` | Top 20, cached at the CDN for 30 seconds |
+
+- The Google ID token's signature, issuer, audience and expiry are checked against Google's published keys. Only Google's numeric account ID is stored, never email, name or photo.
+- Sessions are a signed, HttpOnly, Secure, SameSite cookie; state-changing requests must be same-origin JSON (CSRF protection).
+- One attempt per account per day is enforced with a Redis lock, using the server's date. The daily seed is an HMAC of the date, so future mazes cannot be computed in advance.
+- A submitted run is rejected if it claims more play time than has actually passed since it started, and it is scored only by replaying its inputs.
+- Leaving mid-run submits what was played (and retries on the next visit if the network failed), so a refresh never silently loses the attempt.
+
+### Moderation
+
+Nicknames are checked against a blocklist that sees through leetspeak and separators. To act on the live data, connect Upstash, run `npx vercel env pull .env.local --environment=production` once (the file is git-ignored), then:
+
+```bash
+npm run admin -- top daily
+npm run admin -- rename <nickname> <new-name>
+npm run admin -- ban <nickname>
+```
+
+`ban` removes the player from every board and blocks ranked play; `unban` reverses it.
+
+### Capacity on the free tiers
+
+Gameplay runs entirely in the browser, so the number of simultaneous players is not limited by the server. Each ranked player costs roughly 10-15 Redis commands per day; Upstash's free tier (500,000 commands a month) therefore covers on the order of 1,000 daily ranked players, and Vercel's Hobby plan (1,000,000 requests and function invocations a month) about 10,000. Beyond that, Upstash pay-as-you-go costs about $0.20 per 100,000 commands. Hobby is for non-commercial use.
 
 ## Known limitations
 
-- **No accounts.** Nicknames are self-chosen. The daily-attempt lock and streak live in the browser's `localStorage`, so clearing storage allows another attempt, and the shared board trusts submitted scores within the API's validation limits.
-- **Anti-cheat is not built yet.** Runs are deterministic, so a future version can upload the input log and re-simulate it on the server with `replayRun`. The simulation is ready for this; the upload and verification are not.
-- **Leaderboard storage has not been load-tested** against a live Redis instance.
+- **One person, several Google accounts.** Each account gets its own Daily attempt. That takes real effort, but it is not prevented.
+- **Bots playing in real time.** A custom program that plays through the browser at real speed produces valid input logs. The built-in autopilot is disabled for ranked runs, and runs cannot be submitted faster than real time.
+- **Sessions are stateless.** Signing out clears the cookie; a stolen cookie would stay valid until it expires (30 days) unless `SESSION_SECRET` is changed, which signs everyone out.
+- **Data deletion is manual** (see `public/privacy.html`).
 - Audio is synthesised and has not been covered by automated checks.
 
 ## Credits
