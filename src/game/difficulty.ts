@@ -25,9 +25,9 @@ export interface LevelDef {
 }
 
 export const LEVELS: Record<Level, LevelDef> = {
-  easy: { label: 'EASY', blurb: 'Slower dishes, 4 stomachs, longer Maggi, no boss. Score x0.75.', speed: 0.86, release: 1.35, hunger: 1.3, maggi: 2, stomachs: 4, cap: 0.9, score: 0.75 },
+  easy: { label: 'EASY', blurb: 'Slower dishes, 4 stomachs, longer Maggi, no boss. Score x0.75.', speed: 0.72, release: 1.6, hunger: 1.3, maggi: 2, stomachs: 4, cap: 0.9, score: 0.75 },
   normal: { label: 'NORMAL', blurb: 'The intended recipe. Score x1.', speed: 1, release: 1, hunger: 1, maggi: 0, stomachs: 3, cap: 0.9, score: 1 },
-  hard: { label: 'HARD', blurb: 'Faster dishes, quicker releases, shorter Maggi, hungrier you. Score x1.5.', speed: 1.1, release: 0.75, hunger: 0.8, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.5 },
+  hard: { label: 'HARD', blurb: 'Faster dishes, quicker releases, shorter Maggi, hungrier you. Score x1.5.', speed: 1.08, release: 0.75, hunger: 0.8, maggi: -1.5, stomachs: 3, cap: 0.96, score: 1.5 },
 };
 
 export const asLevel = (v: unknown): Level => (v === 'easy' || v === 'hard' ? v : 'normal');
@@ -52,7 +52,7 @@ export function stageDifficulty(weekday: number, course: number, adaptive = 1, l
   if (tier >= 1 || course >= 2 || level === 'hard') roster.push('curry');
   if (tier >= 2 || (tier >= 1 && course >= 1) || (level === 'hard' && course >= 1)) roster.push('special');
   if (level === 'easy' && roster.length > 3) roster.pop(); // the boss takes the day off
-  const base = 0.63 + 0.022 * tier + 0.018 * course;
+  const base = 0.48 + 0.018 * tier + 0.013 * course;
   return {
     tier,
     course,
