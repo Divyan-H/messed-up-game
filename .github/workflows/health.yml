@@ -1,0 +1,48 @@
+name: Health check
+
+# Once a day, ask the live API for its health summary (errors in the last 24 hours and projected Redis
+# usage). If anything needs attention, open (or update) a GitHub issue, which emails the repo owner.
+# Needs the repository secret CRON_SECRET (the same value as the CRON_SECRET env var in Vercel).
+
+on:
+  schedule:
+    - cron: '30 3 * * *' # 09:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the live API
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+          SITE: ${{ vars.SITE_URL || 'https://messed-up-game.vercel.app' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::notice::The CRON_SECRET secret is not set, so the health check is skipped."
+            exit 0
+          fi
+          code=$(curl -s -o health.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$SITE/api/health" || echo 000)
+          if [ "$code" = "200" ] && jq -e '.ok' health.json > /dev/null; then
+            echo "Healthy"
+            jq . health.json
+            exit 0
+          fi
+          if [ "$code" = "200" ]; then
+            summary=$(jq -r '"Errors in the last 24 hours: \(.errors24h)\nProjected Redis commands this month: \(.projectedThisMonth) of \(.freeTierCommands) free (\(.projectedPercent)%)\nPlayers: \(.players), with reminders: \(.reminderPlayers)\n\nRecent errors:\n" + ([.recentErrors[] | "- [\(.src)] \(.msg | split("\n")[0]) (\(.where // "-"))"] | join("\n"))' health.json)
+          else
+            summary="The health endpoint answered HTTP $code instead of 200."
+          fi
+          body=$(printf '%s\n\nWorkflow run: %s/%s/actions/runs/%s' "$summary" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Health alert in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Health alert: MESSED UP needs attention" --body "$body"
+          fi
+          exit 1
