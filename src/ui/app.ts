@@ -69,6 +69,7 @@ export class App {
     sh.classList.toggle('font-clear', s.font === 'clear');
     sh.dataset.pad = s.pad;
     sh.dataset.padSide = s.padSide;
+    sh.dataset.control = s.touchControl;
     this.layout.setTextSize(s.textSize);
     window.dispatchEvent(new Event('resize'));
   }

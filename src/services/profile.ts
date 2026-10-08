@@ -9,6 +9,7 @@ export type TextSize = 'small' | 'medium' | 'large';
 export type ScaleMode = 'auto' | 'fill' | 'crisp';
 export type PadMode = 'auto' | 'on' | 'off';
 export type PadSide = 'left' | 'center' | 'right';
+export type TouchControl = 'dpad' | 'joystick';
 export type FxLevel = 'full' | 'low' | 'off';
 export type FontMode = 'pixel' | 'clear';
 
@@ -31,6 +32,7 @@ export interface Settings {
   // controls
   pad: PadMode;
   padSide: PadSide;
+  touchControl: TouchControl;
   vibrate: boolean;
   // audio
   sound: boolean;
@@ -53,6 +55,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = {
   showFps: false,
   pad: 'auto',
   padSide: 'center',
+  touchControl: 'dpad',
   vibrate: true,
   sound: true,
   volume: 0.7,
@@ -82,6 +85,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     showFps: bool(r.showFps, d.showFps),
     pad: oneOf(r.pad, ['auto', 'on', 'off'], d.pad),
     padSide: oneOf(r.padSide, ['left', 'center', 'right'], d.padSide),
+    touchControl: oneOf(r.touchControl, ['dpad', 'joystick'], d.touchControl),
     vibrate: bool(r.vibrate, d.vibrate),
     sound: bool(r.sound, d.sound),
     volume: vol,
