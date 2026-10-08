@@ -37,6 +37,14 @@ export class UpstashRedis implements Redis {
     return json.result as T;
   }
 
+  /** Several independent commands in one HTTP request (not atomic). Used by the backup tool. */
+  async pipeline(commands: Cmd[]): Promise<unknown[]> {
+    const json = (await this.post('/pipeline', commands)) as Array<{ result?: unknown; error?: string }> | null;
+    if (!Array.isArray(json)) throw new RedisError('redis: bad pipeline reply');
+    for (const r of json) if (r.error) throw new RedisError(r.error);
+    return json.map((r) => r.result);
+  }
+
   async multi(commands: Cmd[]): Promise<unknown[]> {
     const json = (await this.post('/multi-exec', commands)) as Array<{ result?: unknown; error?: string }> | { error?: string } | null;
     if (!Array.isArray(json)) throw new RedisError((json as { error?: string } | null)?.error ?? 'redis: bad transaction reply');
