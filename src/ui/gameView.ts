@@ -24,6 +24,7 @@ import type { App, Screen } from './app';
 import { button, clear, fmt, h, spriteImg } from './dom';
 import { InputController } from './input';
 import { fitScale } from './layout';
+import { drawShareCard, shortDate } from './shareCard';
 import { runTour, type TourHandle } from './tour';
 
 const pick = <T,>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
@@ -65,6 +66,8 @@ export class GameView {
   private readonly autopilot: boolean;
   /** Server verification of a finished Daily Run (null in Practice). */
   private submission: Promise<DailyFinish> | null = null;
+  /** The server's verdict once it arrives (used by the share card). */
+  private verified: DailyFinish | null = null;
   private readonly simSpeed: number;
 
   // DOM
@@ -115,6 +118,12 @@ export class GameView {
       return b;
     };
     const dpad = h('div', { class: 'dpad' }, pad('up', 1), pad('left', 4), pad('right', 2), pad('down', 3));
+    const knob = h('div', { class: 'js-knob' });
+    const stickBase = h('div', { class: 'js-base' }, ...['up', 'right', 'down', 'left'].map((d) => h('span', { class: `js-arrow ${d}` })), knob);
+    const joystick = h('div', { class: 'joystick', role: 'group', 'aria-label': 'Joystick' }, stickBase);
+    this.input.bindJoystick(stickBase, knob, () => {
+      if (this.app.settings.vibrate) navigator.vibrate?.(8);
+    });
 
     this.wrap.append(this.canvas, this.toastEl, this.fpsEl, this.overlay);
     this.fpsEl.classList.toggle('hidden', !this.app.settings.showFps);
@@ -126,7 +135,7 @@ export class GameView {
         h('div', { class: 'hud-row' }, h('div', { class: 'bar hunger' }, this.hungerBar), this.comboEl),
         this.maggiWrap,
       ),
-      this.wrap, this.ticker, dpad,
+      this.wrap, this.ticker, dpad, joystick,
     );
 
     this.hudEl = el;
@@ -346,7 +355,7 @@ export class GameView {
     const food = st.foodAt.values().next().value;
     const maggi = st.maggiAlive.values().next().value as number | undefined;
     const steps = [
-      { target: () => this.tileRect(moverX(p), moverY(p)), title: 'THIS IS YOU', text: 'The hungry student with the white glow. Steer with Arrow keys / WASD, swipe on the maze, or the on-screen pad. You keep moving until you turn.' },
+      { target: () => this.tileRect(moverX(p), moverY(p)), title: 'THIS IS YOU', text: 'The hungry student with the white glow. Steer with Arrow keys / WASD, swipe on the maze, or the on-screen D-pad or joystick (Settings). You keep moving until you turn.' },
       { target: () => (enemy ? this.tileRect(moverX(enemy.m), moverY(enemy.m)) : null), title: 'THE CHASERS', text: 'Angry dishes with a red glow hunt you. Touching one costs a stomach. They turn blue when scared, and then YOU can eat them.' },
       { target: () => (food ? this.tileRect(xOf(food.tile), yOf(food.tile)) : null), title: 'DISHES', text: 'Eat every dish for +10 each. Eat quickly to chain a combo, up to x5.' },
       { target: () => (maggi !== undefined ? this.tileRect(xOf(maggi), yOf(maggi)) : null), title: 'OUTSIDE MAGGI', text: 'A power-up. Eat it and every chaser gets scared for a few seconds. Chase them down for big points.' },
@@ -578,14 +587,61 @@ export class GameView {
     }
   }
 
+  private shareScore(): number {
+    return this.verified?.score ?? this.finalScore();
+  }
+
   private shareText(): string {
     const run = this.run;
     const streak = this.app.account.user?.streak.current ?? 0;
     const courses = [0, 1, 2].map((i) => (run.outcomes[i]?.cleared ? ['🍳', '🍛', '🌙'][i] : '💀')).join('');
-    const d = new Date(`${this.cfg.dateKey}T00:00:00Z`).toUTCString().slice(5, 11);
-    return [`MESSED UP - ${this.cfg.mode === 'daily' ? d : 'practice'}${this.level === 'normal' ? '' : ` (${LEVELS[this.level].label})`}`, `${fmt(this.finalScore())} pts ${courses}`, this.cfg.mode === 'daily' ? `🔥 ${streak} day streak` : '', location.origin]
+    const d = shortDate(this.cfg.dateKey);
+    return [`MESSED UP - ${this.cfg.mode === 'daily' ? d : 'practice'}${this.level === 'normal' ? '' : ` (${LEVELS[this.level].label})`}`, `${fmt(this.shareScore())} pts ${courses}`, this.cfg.mode === 'daily' ? `🔥 ${streak} day streak` : '', location.origin]
       .filter(Boolean)
       .join('\n');
+  }
+
+  /**
+   * Share the score card image through the phone's share sheet (WhatsApp, Instagram...). Where sharing
+   * files is not supported (most desktops), the image is downloaded and the text copied instead.
+   */
+  private async share(status: HTMLElement): Promise<void> {
+    const run = this.run;
+    const card = drawShareCard({
+      mode: this.cfg.mode,
+      weekday: this.cfg.weekday,
+      dateLabel: shortDate(this.cfg.dateKey),
+      score: this.shareScore(),
+      levelLabel: this.level === 'normal' ? null : `${LEVELS[this.level].label} x${LEVELS[this.level].score}`,
+      cleared: [0, 1, 2].map((i) => run.outcomes[i]?.cleared === true),
+      dishes: run.totals.food,
+      streak: this.app.account.user?.streak.current ?? 0,
+      rank: this.verified?.rank ?? null,
+      site: location.host,
+    });
+    const blob = await new Promise<Blob | null>((done) => card.toBlob(done, 'image/png'));
+    const text = this.shareText();
+    const file = blob ? new File([blob], 'messed-up-score.png', { type: 'image/png' }) : null;
+    if (file && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], text, title: 'MESSED UP' });
+        status.textContent = 'Shared!';
+        return;
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return;
+      }
+    }
+    if (blob) {
+      const url = URL.createObjectURL(blob);
+      h('a', { href: url, download: 'messed-up-score.png' }).click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      status.textContent = blob ? 'Image saved and text copied. Post it anywhere!' : 'COPIED! Paste it in the group chat.';
+    } catch {
+      status.textContent = blob ? 'Image saved.' : text;
+    }
   }
 
   private showEnd(): void {
@@ -602,6 +658,7 @@ export class GameView {
       rank.textContent = 'VERIFYING SCORE...';
       this.submission.then(
         (res) => {
+          this.verified = res;
           finalEl.textContent = fmt(res.score);
           rank.textContent = `VERIFIED - RANK #${res.rank} TODAY`;
           rank.className = 'hint good';
@@ -628,14 +685,7 @@ export class GameView {
         ? h('p', { class: 'hint' }, `${streak} day streak. Next menu in `, countdown)
         : h('p', { class: 'hint' }, `Practice best ${fmt(p.practiceBest)}`),
       rank, ...badges,
-      button('SHARE', async () => {
-        try {
-          await navigator.clipboard.writeText(this.shareText());
-          copied.textContent = 'COPIED! Paste it in the group chat.';
-        } catch {
-          copied.textContent = this.shareText();
-        }
-      }, 'primary'),
+      button('SHARE SCORE CARD', () => void this.share(copied), 'primary'),
       copied,
       this.cfg.mode === 'practice' ? button('PLAY AGAIN', () => this.app.startPractice(this.cfg.weekday, { skipPreview: true })) : null,
       button('HALL OF FAME', () => this.app.goHall()),

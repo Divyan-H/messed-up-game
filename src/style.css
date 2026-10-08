@@ -482,3 +482,70 @@ html, body { overflow: hidden; }
 .acct .btn.linkish { width: auto; padding: 4px; margin: 0; }
 .legal { text-align: center; margin: 4px 0 0; font-size: calc(7px * var(--ui) * var(--fz)); }
 .legal a { color: var(--dim); }
+
+/* ---------- account and app settings ---------- */
+.btn.tog.danger { background: var(--red); color: #fff; }
+.set-ctl { flex: none; display: flex; justify-content: flex-end; max-width: 50%; text-align: right; font-size: calc(7px * var(--ui) * var(--fz)); line-height: 1.6; }
+.legal.left { text-align: left; }
+.legal { display: flex; justify-content: center; align-items: center; gap: 12px; }
+.legal.left { justify-content: flex-start; }
+.install-link { width: auto; margin: 0; padding: 2px 4px; color: var(--accent); }
+
+/* ---------- portrait phones: compact HUD so the maze gets the height ----------
+   Two rows instead of three: hearts, score, dishes left and buttons; then the hunger bar and combo.
+   The course name is in the intro card, so it is dropped here; the tip ticker becomes one line. */
+#app[data-layout='tall'] .titlebar { padding: 3px 6px; font-size: calc(8px * var(--ui) * var(--fz)); }
+#app[data-layout='tall'] .tb-btn { padding: 3px 5px; }
+#app[data-layout='tall'] .game { padding: 4px; gap: 4px; }
+#app[data-layout='tall'] .hud {
+  display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; column-gap: 8px; row-gap: 4px; padding: 4px 6px;
+  grid-template-areas: 'hearts score left btns' 'bar bar bar combo' 'maggi maggi maggi maggi';
+}
+#app[data-layout='tall'] .hud-row { display: contents; }
+#app[data-layout='tall'] .hearts { grid-area: hearts; min-width: 0; gap: 2px; }
+#app[data-layout='tall'] .hearts .heart { width: calc(17px * var(--ui)); height: auto; }
+#app[data-layout='tall'] .score { grid-area: score; flex: none; text-align: left; font-size: calc(12px * var(--ui) * var(--fz)); }
+#app[data-layout='tall'] .hud .left { grid-area: left; text-align: right; font-size: calc(7px * var(--ui) * var(--fz)); }
+#app[data-layout='tall'] .daylabel { display: none; }
+#app[data-layout='tall'] .hud-btns { grid-area: btns; }
+#app[data-layout='tall'] .hud-btns .btn { padding: 4px 7px; font-size: calc(8px * var(--ui) * var(--fz)); }
+#app[data-layout='tall'] .bar.hunger { grid-area: bar; height: 8px; }
+#app[data-layout='tall'] .combo { grid-area: combo; min-width: 0; font-size: calc(7px * var(--ui) * var(--fz)); }
+#app[data-layout='tall'] .bar.maggi { grid-area: maggi; height: 6px; }
+#app[data-layout='tall'] .ticker {
+  min-height: 0; padding: 2px 6px; font-size: calc(7px * var(--ui) * var(--fz)); line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* the D-pad also sizes to the screen height, so short phones keep room for the maze */
+.dpad { --pad: clamp(52px, min(20vmin, 10.5vh), 92px); }
+
+/* ---------- joystick: an alternative to the D-pad (Settings > Controls > Touch control) ---------- */
+.joystick { --stick: clamp(100px, min(36vmin, 19vh), 150px); display: none; flex: none; width: var(--stick); height: var(--stick); margin: 2px auto 0; touch-action: none; }
+@media (pointer: coarse), (max-width: 520px) { #app[data-control='joystick'] .joystick { display: block; } }
+#app[data-pad='on'][data-control='joystick'] .joystick { display: block; }
+#app[data-pad='off'] .joystick { display: none; }
+#app[data-control='joystick'] .dpad { display: none !important; }
+#app[data-pad-side='left'] .joystick { margin-left: 8px; margin-right: auto; }
+#app[data-pad-side='right'] .joystick { margin-left: auto; margin-right: 8px; }
+#app[data-layout='wide'] .joystick { grid-column: 2; grid-row: 3; align-self: end; justify-self: center; --stick: clamp(96px, calc(180px * var(--ui)), 170px); }
+.js-base {
+  position: relative; width: 100%; height: 100%; border-radius: 50%; touch-action: none; user-select: none; cursor: grab;
+  background: radial-gradient(circle, #5a361d 0 52%, #4a2a14 53% 100%);
+  border: 3px solid var(--wood-hi); box-shadow: inset 0 0 0 3px var(--wood-lo), 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+.js-arrow { position: absolute; width: 0; height: 0; border: calc(var(--stick) * 0.065) solid transparent; opacity: 0.45; pointer-events: none; }
+.js-arrow.up { left: 50%; top: 7%; transform: translateX(-50%); border-bottom-color: var(--accent); border-top-width: 0; }
+.js-arrow.down { left: 50%; bottom: 7%; transform: translateX(-50%); border-top-color: var(--accent); border-bottom-width: 0; }
+.js-arrow.left { top: 50%; left: 7%; transform: translateY(-50%); border-right-color: var(--accent); border-left-width: 0; }
+.js-arrow.right { top: 50%; right: 7%; transform: translateY(-50%); border-left-color: var(--accent); border-right-width: 0; }
+.js-base[data-dir='1'] .js-arrow.up, .js-base[data-dir='2'] .js-arrow.right,
+.js-base[data-dir='3'] .js-arrow.down, .js-base[data-dir='4'] .js-arrow.left { opacity: 1; filter: drop-shadow(0 0 4px var(--accent)); }
+.js-knob {
+  position: absolute; left: 50%; top: 50%; width: 42%; height: 42%; margin: -21% 0 0 -21%; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 35% 35%, #ffe08a, #d9a441 58%, #8a5a2e);
+  border: 3px solid var(--ink); box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.4);
+  transform: translate(var(--kx, 0px), var(--ky, 0px)); transition: transform 0.12s ease-out;
+}
+.js-base.active { cursor: grabbing; }
+.js-base.active .js-knob { transition: none; }
+.reduced .js-knob { transition: none; }

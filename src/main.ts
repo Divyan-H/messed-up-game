@@ -3,6 +3,12 @@ import './style.css';
 import { sfx } from './audio/sfx';
 import { App } from './ui/app';
 import { h } from './ui/dom';
+import { initErrorReporting } from './ui/errorReporter';
+import { initInstall, registerServiceWorker } from './ui/install';
+
+initErrorReporting();
+initInstall();
+registerServiceWorker();
 
 const shell = document.getElementById('app')!;
 const screen = document.getElementById('screen')!;

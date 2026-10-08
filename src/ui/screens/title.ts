@@ -11,7 +11,9 @@ import { nicknameProblem, NICK_MAX } from '../../services/nickname';
 import type { StreakStatus } from '../../services/streak';
 import type { App, Screen } from '../app';
 import { button, fmt, h, spriteImg } from '../dom';
+import { disableReminders } from '../../services/push';
 import { forgetGoogleSelection, renderGoogleButton } from '../google';
+import { canPromptInstall, isStandalone, onInstallChange, promptInstall } from '../install';
 
 const STREAK_MSG: Record<StreakStatus, string> = {
   new: 'Play today to start a streak!',
@@ -164,7 +166,7 @@ export function titleScreen(app: App): Screen {
           onclick: () => {
             sfx.click();
             forgetGoogleSelection();
-            void account.signOut();
+            void disableReminders().catch(() => undefined).finally(() => account.signOut());
           },
         }, 'SIGN OUT'),
       ),
@@ -213,18 +215,24 @@ export function titleScreen(app: App): Screen {
     ),
     nameRow,
     h('p', { class: 'tip' }, LOADING_TIPS[Math.floor(Math.random() * LOADING_TIPS.length)]),
-    h('p', { class: 'legal' }, h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, 'Privacy')),
+    h('p', { class: 'legal' },
+      canPromptInstall() && !isStandalone()
+        ? h('button', { class: 'btn small linkish install-link', type: 'button', onclick: () => { sfx.click(); void promptInstall(); } }, 'INSTALL APP')
+        : null,
+      h('a', { href: '/privacy.html', target: '_blank', rel: 'noopener' }, 'Privacy')),
   );
   const el = h('div', { class: 'title' }, hero, actions);
 
   // re-draw when the account changes (signed in or out, renamed, run verified, new day)
   const off = account.subscribe(() => app.goTitle());
+  const offInstall = onInstallChange(() => app.goTitle());
 
   return {
     el,
     fit: true,
     dispose: () => {
       off();
+      offInstall();
       cancelAnimationFrame(raf);
       clearInterval(timer);
     },

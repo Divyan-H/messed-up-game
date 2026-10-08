@@ -132,6 +132,19 @@ export class Account {
     if (this.me) this.set({ ...this.me, user: null });
   }
 
+  /** Signs this account out on every device (a stolen cookie stops working too). */
+  async signOutEverywhere(): Promise<void> {
+    await apiRequest('/api/auth/everywhere', { method: 'POST' });
+    if (this.me) this.set({ ...this.me, user: null });
+  }
+
+  /** Permanently deletes the account, its nickname and every score. */
+  async deleteAccount(): Promise<void> {
+    await apiRequest('/api/me', { method: 'DELETE', body: { confirm: 'DELETE' } });
+    saveJson(PENDING_KEY, null);
+    if (this.me) this.set({ ...this.me, user: null });
+  }
+
   async rename(name: string): Promise<void> {
     this.set(await apiRequest<MeResponse>('/api/me', { method: 'PATCH', body: { name } }));
   }
