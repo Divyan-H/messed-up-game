@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign as rsaSign } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, sign as rsaSign, verify as ecVerify } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { botRun } from '../src/game/bot';
 import { LEVELS, type Level } from '../src/game/difficulty';
@@ -8,6 +8,8 @@ import { FakeUpstash } from '../server/dev/fakeUpstash';
 import { readEnv } from '../server/env';
 import { clearGoogleKeyCache } from '../server/google';
 import { isNicknameAllowed } from '../server/moderation';
+import { CountingRedis } from '../server/monitor';
+import { vapidKeys } from '../server/push';
 import { UpstashRedis } from '../server/redis';
 import { readSession, signSession } from '../server/session';
 
@@ -37,7 +39,18 @@ const env = readEnv({
   UPSTASH_REDIS_REST_TOKEN: 'secret-token',
   TEST_GOOGLE_JWKS_URL: JWKS,
   TEST_GOOGLE_ISSUER: ISSUER,
+  CRON_SECRET: 'cron-secret-0123456789',
 });
+/** Push service stand-in: records requests and answers with a chosen status per endpoint. */
+let pushed: Array<{ endpoint: string; auth: string }> = [];
+let pushStatus: Record<string, number> = {};
+const serviceFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url === JWKS) return (keysFetch as (u: string) => Promise<Response>)(url);
+  pushed.push({ endpoint: url, auth: String((init?.headers as Record<string, string>)?.authorization ?? '') });
+  return new Response(null, { status: pushStatus[url] ?? 201 });
+}) as typeof fetch;
+const subscription = (n: number) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/device-${n}`, keys: { p256dh: 'BPk', auth: 'aa' } });
 const claimsFor = (sub: string, extra: Record<string, unknown> = {}) => ({
   iss: ISSUER, aud: env.googleClientId, sub, iat: Math.floor(clock / 1000), exp: Math.floor(clock / 1000) + 3600, ...extra,
 });
@@ -68,7 +81,9 @@ beforeEach(() => {
   clock = START;
   clearGoogleKeyCache();
   fake = new FakeUpstash(() => clock);
-  api = createHandler({ env, redis: new UpstashRedis('https://redis.test', 'secret-token', fake.fetch), now: () => clock, fetchImpl: keysFetch });
+  pushed = [];
+  pushStatus = {};
+  api = createHandler({ env, redis: new UpstashRedis('https://redis.test', 'secret-token', fake.fetch), now: () => clock, fetchImpl: serviceFetch });
 });
 
 describe('api: setup and sign-in', () => {
@@ -141,7 +156,7 @@ describe('api: setup and sign-in', () => {
 
   it('sessions round-trip and expire', () => {
     const t = signSession('bob', 'k', START);
-    expect(readSession(t, 'k', START)).toBe('bob');
+    expect(readSession(t, 'k', START)).toEqual({ sub: 'bob', v: 0 });
     expect(readSession(t, 'other-key', START)).toBeNull();
     expect(readSession(t, 'k', START + 31 * 86_400_000)).toBeNull();
   });
@@ -295,5 +310,127 @@ describe('api: leaderboard requests', () => {
   it('routes rewritten requests (?route=) the same as direct paths', async () => {
     expect((await call('GET', '/api/game?route=leaderboard&board=alltime')).status).toBe(200);
     expect((await call('GET', '/api/game?route=nope')).status).toBe(404);
+  });
+});
+
+describe('api: account controls', () => {
+  it('signs out every device at once', async () => {
+    const phone = await signIn('alice');
+    const laptop = await signIn('alice');
+    expect((await call('POST', '/api/auth/everywhere', {}, phone)).status).toBe(200);
+    expect((await call('GET', '/api/me', undefined, laptop)).body.user).toBeNull();
+    expect((await call('POST', '/api/daily/start', { level: 'normal' }, phone)).status).toBe(401);
+    const fresh = await signIn('alice');
+    expect((await call('GET', '/api/me', undefined, fresh)).body.user).not.toBeNull();
+  });
+
+  it('deletes the account, its name and its scores, but not today\'s attempt lock', async () => {
+    const a = await signIn('alice');
+    await call('PATCH', '/api/me', { name: 'GoneSoon' }, a);
+    const start = (await call('POST', '/api/daily/start', { level: 'normal' }, a)).body;
+    const { run } = playDaily(start.seed);
+    clock += (run.tickCount / 60) * 1000 + 1000;
+    await call('POST', '/api/daily/finish', { attemptId: start.attemptId, ticks: run.tickCount, log: run.log }, a);
+    expect((await call('GET', '/api/leaderboard?board=alltime')).body.entries).toHaveLength(1);
+
+    expect((await call('DELETE', '/api/me', {}, a)).status).toBe(400); // needs explicit confirmation
+    const del = await call('DELETE', '/api/me', { confirm: 'DELETE' }, a);
+    expect(del.status).toBe(200);
+    expect(del.headers.get('set-cookie')).toMatch(/Max-Age=0/);
+    for (const b of ['daily', 'alltime', 'streak']) expect((await call('GET', `/api/leaderboard?board=${b}`)).body.entries).toHaveLength(0);
+    expect((await call('GET', '/api/me', undefined, a)).body.user).toBeNull();
+
+    const bob = await signIn('bob');
+    expect((await call('PATCH', '/api/me', { name: 'GoneSoon' }, bob)).status).toBe(200); // name is free again
+    const again = await signIn('alice'); // a brand-new account...
+    expect((await call('POST', '/api/daily/start', { level: 'normal' }, again)).body.error).toBe('already_played'); // ...but no second run today
+  });
+});
+
+describe('api: streak reminders (web push)', () => {
+  it('only accepts subscriptions for real push services', async () => {
+    const a = await signIn('alice');
+    const bad = { endpoint: 'https://evil.test/collect', keys: { p256dh: 'x', auth: 'y' } };
+    expect((await call('POST', '/api/push/subscribe', { subscription: bad }, a)).status).toBe(400);
+    expect((await call('POST', '/api/push/subscribe', { subscription: subscription(1) }, a)).status).toBe(200);
+    expect((await call('POST', '/api/push/subscribe', { subscription: subscription(1) })).status).toBe(401);
+  });
+
+  it('serves a stable public key the browser can subscribe with', async () => {
+    const key = (await call('GET', '/api/push/key')).body.key as string;
+    expect(Buffer.from(key, 'base64url')).toHaveLength(65);
+    expect((await call('GET', '/api/push/key')).body.key).toBe(key);
+  });
+
+  it('reminds only players with a streak to lose, with a valid VAPID signature, and drops dead devices', async () => {
+    const alice = await signIn('alice');
+    const bob = await signIn('bob');
+    const carol = await signIn('carol');
+    await call('POST', '/api/daily/start', { level: 'normal' }, alice); // alice and bob play on day 1
+    await call('POST', '/api/daily/start', { level: 'normal' }, bob);
+    for (const [c, n] of [[alice, 1], [alice, 2], [bob, 3], [carol, 4]] as const) await call('POST', '/api/push/subscribe', { subscription: subscription(n) }, c);
+    clock += 86_400_000; // day 2: bob plays again, alice has not yet, carol has no streak
+    await call('POST', '/api/daily/start', { level: 'normal' }, bob);
+    pushStatus[subscription(2).endpoint] = 410; // alice uninstalled the game on one device
+
+    expect((await call('GET', '/api/cron/reminders')).status).toBe(401);
+    const run = await call('GET', '/api/cron/reminders', undefined, undefined, { authorization: 'Bearer cron-secret-0123456789' });
+    expect(run.status).toBe(200);
+    expect(run.body).toMatchObject({ checked: 3, reminded: 1, sent: 1, removed: 1 });
+    expect(pushed.map((p) => p.endpoint).sort()).toEqual([subscription(1).endpoint, subscription(2).endpoint]);
+
+    // the Authorization header is a VAPID JWT a push service can verify with our public key
+    const m = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(pushed[0]!.auth)!;
+    const [, h, c, sig, k] = m as unknown as [string, string, string, string, string];
+    const pub = Buffer.from(k, 'base64url');
+    const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: pub.subarray(1, 33).toString('base64url'), y: pub.subarray(33).toString('base64url') }, format: 'jwk' });
+    expect(ecVerify('sha256', Buffer.from(`${h}.${c}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(sig, 'base64url'))).toBe(true);
+    expect(JSON.parse(Buffer.from(c, 'base64url').toString())).toMatchObject({ aud: 'https://fcm.googleapis.com', sub: env.siteUrl });
+    expect(k).toBe(vapidKeys(env.secret!).publicKey);
+
+    pushed = [];
+    await call('GET', '/api/cron/reminders', undefined, undefined, { authorization: 'Bearer cron-secret-0123456789' });
+    expect(pushed.map((p) => p.endpoint)).toEqual([subscription(1).endpoint]); // the dead device is gone
+  });
+});
+
+describe('api: monitoring', () => {
+  const cron = { authorization: 'Bearer cron-secret-0123456789' };
+
+  it('records browser errors (rate-limited) and reports them in the health check', async () => {
+    expect((await call('GET', '/api/health')).status).toBe(401);
+    let h = (await call('GET', '/api/health', undefined, undefined, cron)).body;
+    expect(h.ok).toBe(true);
+    await call('POST', '/api/report', { message: 'TypeError: x is undefined', where: 'gameView.ts:10' });
+    h = (await call('GET', '/api/health', undefined, undefined, cron)).body;
+    expect(h.ok).toBe(false);
+    expect(h.errors24h).toBe(1);
+    expect(h.recentErrors[0]).toMatchObject({ src: 'client', msg: 'TypeError: x is undefined' });
+    clock += 25 * 3600 * 1000;
+    expect((await call('GET', '/api/health', undefined, undefined, cron)).body.errors24h).toBe(0);
+    let last = 0;
+    for (let i = 0; i < 22; i++) last = (await call('POST', '/api/report', { message: 'spam' }, undefined, { 'x-forwarded-for': '9.9.9.9' })).status;
+    expect(last).toBe(429);
+  });
+
+  it('records unexpected server errors', async () => {
+    const broken = createHandler({ env, redis: new UpstashRedis('https://redis.test', 'secret-token', fake.fetch), now: () => clock, fetchImpl: (() => { throw new Error('boom'); }) as unknown as typeof fetch });
+    const res = await broken(new Request(`${ORIGIN}/api/auth`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ORIGIN }, body: JSON.stringify({ credential: idToken(claimsFor('x')) }) }));
+    expect(res.status).toBe(500);
+    const h = (await call('GET', '/api/health', undefined, undefined, cron)).body;
+    expect(h.recentErrors[0]).toMatchObject({ src: 'server', where: 'POST auth' });
+  });
+
+  it('counts Redis commands and estimates monthly usage', async () => {
+    const counting = new CountingRedis(new UpstashRedis('https://redis.test', 'secret-token', fake.fetch), () => clock);
+    await counting.cmd(['GET', 'a']);
+    await counting.multi([['GET', 'a'], ['GET', 'b']]);
+    await counting.flush();
+    expect((await call('GET', '/api/health', undefined, undefined, cron)).body.commandsThisMonth).toBe(0); // not due yet
+    clock += 11 * 60 * 1000;
+    await counting.flush();
+    const h = (await call('GET', '/api/health', undefined, undefined, cron)).body;
+    expect(h.commandsThisMonth).toBe(5); // 3 counted + the 2 commands of the flush itself
+    expect(h.freeTierCommands).toBe(500_000);
   });
 });

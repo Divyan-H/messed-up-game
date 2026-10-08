@@ -4,13 +4,12 @@
  */
 import { createHandler } from './app';
 import { readEnv } from './env';
+import { CountingRedis } from './monitor';
 import { UpstashRedis } from './redis';
 
 const env = readEnv();
-const handler = createHandler({
-  env,
-  redis: env.redisUrl && env.redisToken ? new UpstashRedis(env.redisUrl, env.redisToken) : null,
-});
+const redis = env.redisUrl && env.redisToken ? new CountingRedis(new UpstashRedis(env.redisUrl, env.redisToken)) : null;
+const handler = createHandler({ env, redis, afterRequest: () => redis?.flush() ?? Promise.resolve() });
 
 export const GET = handler;
 export const POST = handler;

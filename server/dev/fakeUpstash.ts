@@ -2,7 +2,7 @@
  * In-memory stand-in for the Upstash REST API, for tests and local development only (never bundled).
  * Implements just the commands the game server uses, with Redis semantics for NX/GT/TTL.
  */
-type Val = string | Map<string, string> | Map<string, number>;
+type Val = string | Map<string, string> | Map<string, number> | Set<string> | string[];
 
 export class FakeUpstash {
   private readonly data = new Map<string, { v: Val; exp: number }>();
@@ -33,9 +33,37 @@ export class FakeUpstash {
     let v = this.get(key) as Map<string, number> | undefined;
     if (!v && create) {
       v = new Map();
+      (v as unknown as { zset: boolean }).zset = true;
       this.data.set(key, { v, exp: 0 });
     }
     return v;
+  }
+
+  private set(key: string, create = false): Set<string> | undefined {
+    let v = this.get(key) as Set<string> | undefined;
+    if (!v && create) {
+      v = new Set();
+      this.data.set(key, { v, exp: 0 });
+    }
+    return v;
+  }
+
+  private list(key: string, create = false): string[] | undefined {
+    let v = this.get(key) as string[] | undefined;
+    if (!v && create) {
+      v = [];
+      this.data.set(key, { v, exp: 0 });
+    }
+    return v;
+  }
+
+  private typeOf(v: Val | undefined): string {
+    if (v === undefined) return 'none';
+    if (typeof v === 'string') return 'string';
+    if (Array.isArray(v)) return 'list';
+    if (v instanceof Set) return 'set';
+    const first = (v as Map<string, unknown>).values().next();
+    return first.done ? ((v as unknown as { zset?: boolean }).zset ? 'zset' : 'hash') : typeof first.value === 'number' ? 'zset' : 'hash';
   }
 
   private ranked(key: string): Array<[string, number]> {
@@ -59,11 +87,76 @@ export class FakeUpstash {
       }
       case 'DEL':
         return [key, ...rest].filter((k) => this.data.delete(k)).length;
+      case 'INCRBY':
       case 'INCR': {
+        const by = op.toUpperCase() === 'INCRBY' ? Number(rest[0]) : 1;
         const e = this.data.get(key);
-        const n = Number(this.get(key) ?? 0) + 1;
+        const n = Number(this.get(key) ?? 0) + by;
         this.data.set(key, { v: String(n), exp: e?.exp ?? 0 });
         return n;
+      }
+      case 'HINCRBY': {
+        const h = this.hash(key, true)!;
+        const n = Number(h.get(rest[0]!) ?? 0) + Number(rest[1]);
+        h.set(rest[0]!, String(n));
+        return n;
+      }
+      case 'HEXISTS':
+        return this.hash(key)?.has(rest[0]!) ? 1 : 0;
+      case 'HLEN':
+        return this.hash(key)?.size ?? 0;
+      case 'SADD': {
+        const st = this.set(key, true)!;
+        return rest.filter((m) => !st.has(m) && st.add(m)).length;
+      }
+      case 'SREM':
+        return rest.filter((m) => this.set(key)?.delete(m)).length;
+      case 'SMEMBERS':
+        return [...(this.set(key) ?? [])];
+      case 'SCARD':
+        return this.set(key)?.size ?? 0;
+      case 'LPUSH': {
+        const l = this.list(key, true)!;
+        l.unshift(...[...rest].reverse());
+        return l.length;
+      }
+      case 'RPUSH': {
+        const l = this.list(key, true)!;
+        l.push(...rest);
+        return l.length;
+      }
+      case 'LTRIM': {
+        const l = this.list(key);
+        if (l) l.splice(0, l.length, ...l.slice(Number(rest[0]), Number(rest[1]) + 1));
+        return 'OK';
+      }
+      case 'LRANGE': {
+        const l = this.list(key) ?? [];
+        const end = Number(rest[1]);
+        return l.slice(Number(rest[0]), end < 0 ? l.length + end + 1 : end + 1);
+      }
+      case 'TYPE':
+        return this.typeOf(this.get(key));
+      case 'PTTL': {
+        const e = this.data.get(key);
+        if (!e || this.get(key) === undefined) return -2;
+        return e.exp ? e.exp - this.now() : -1;
+      }
+      case 'PEXPIRE': {
+        const e = this.data.get(key);
+        if (!e || this.get(key) === undefined) return 0;
+        e.exp = this.now() + Number(rest[0]);
+        return 1;
+      }
+      case 'ZREM':
+        return rest.filter((m) => this.zset(key)?.delete(m)).length;
+      case 'SCAN': {
+        // single-pass scan: returns every matching key with cursor 0
+        const all = [key, ...rest].map(String);
+        const mi = all.findIndex((x) => x.toUpperCase() === 'MATCH');
+        const pattern = mi >= 0 ? all[mi + 1]! : '*';
+        const re = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+        return ['0', [...this.data.keys()].filter((k) => this.get(k) !== undefined && re.test(k))];
       }
       case 'EXPIRE': {
         const e = this.data.get(key);
@@ -110,7 +203,8 @@ export class FakeUpstash {
       }
       case 'ZRANGE': {
         const list = rest.map((x) => x.toUpperCase()).includes('REV') ? this.ranked(key) : this.ranked(key).reverse();
-        const slice = list.slice(Number(rest[0]), Number(rest[1]) + 1);
+        const end = Number(rest[1]);
+        const slice = list.slice(Number(rest[0]), end < 0 ? list.length + end + 1 : end + 1);
         return rest.map((x) => x.toUpperCase()).includes('WITHSCORES') ? slice.flatMap(([m, s]) => [m, String(s)]) : slice.map(([m]) => m);
       }
       case 'ZREVRANK': {

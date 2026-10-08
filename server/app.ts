@@ -1,30 +1,42 @@
 /**
  * HTTP API. One handler serves every route (vercel.json rewrites /api/<route> to it):
  *
- *   GET    /api/me             current player (or null), server time, today's status
- *   PATCH  /api/me             change nickname
- *   POST   /api/auth           sign in with a Google ID token -> session cookie
- *   DELETE /api/auth           sign out
- *   POST   /api/daily/start    begin today's ranked attempt
- *   POST   /api/daily/finish   submit the input log; the server replays it and records the score
- *   GET    /api/leaderboard    board=daily|alltime|streak (cached at the CDN for 30 s)
+ *   GET    /api/me                current player (or null), server time, today's status
+ *   PATCH  /api/me                change nickname
+ *   DELETE /api/me                delete the account and its scores
+ *   POST   /api/auth              sign in with a Google ID token -> session cookie
+ *   DELETE /api/auth              sign out (this device)
+ *   POST   /api/auth/everywhere   sign out on every device
+ *   POST   /api/daily/start       begin today's ranked attempt
+ *   POST   /api/daily/finish      submit the input log; the server replays it and records the score
+ *   GET    /api/leaderboard       board=daily|alltime|streak (cached at the CDN for 30 s)
+ *   GET    /api/push/key          Web Push public key
+ *   POST   /api/push/subscribe    turn on streak reminders for this device (DELETE turns them off)
+ *   POST   /api/report            browser error report
+ *   GET    /api/health            monitoring summary            (Bearer CRON_SECRET)
+ *   GET    /api/cron/reminders    daily streak reminders (cron) (Bearer CRON_SECRET)
  */
-import { daysBetween, weekdayOf } from '../src/core/clock';
+import { timingSafeEqual } from 'node:crypto';
+import { addDays, daysBetween, weekdayOf } from '../src/core/clock';
 import { nicknameProblem } from '../src/services/nickname';
 import { displayStreak, streakStatus } from '../src/services/streak';
 import { finishDaily, serverDate, startDaily, type FinishBody } from './daily';
 import type { ServerEnv } from './env';
 import { verifyGoogleIdToken } from './google';
 import { assertSameOrigin, clientIp, HttpError, json, readJson } from './http';
+import { health, recordError } from './monitor';
+import { addSubscription, parseSubscription, removeSubscription, sendReminders, vapidKeys } from './push';
 import type { Redis } from './redis';
 import { clearSessionCookie, sessionCookie, sessionFromRequest, signSession } from './session';
-import { createUser, getUser, K, rateLimit, renameUser, type User } from './store';
+import { bumpSessionVersion, createUser, DAILY_BOARD_DAYS, deleteUser, getUser, K, rateLimit, renameUser, type User } from './store';
 
 export interface Deps {
   env: ServerEnv;
   redis: Redis | null;
   now?: () => number;
   fetchImpl?: typeof fetch;
+  /** Called after every request (index.ts flushes the command counter here). */
+  afterRequest?: () => Promise<void>;
 }
 
 const BOARD_SIZE = 20;
@@ -33,7 +45,7 @@ function routeOf(req: Request): string {
   const url = new URL(req.url);
   const q = url.searchParams.get('route');
   if (q) return q;
-  return url.pathname.replace(/^\/api\//, '').replace(/\/$/, '').replace('/', '-');
+  return url.pathname.replace(/^\/api\//, '').replace(/\/$/, '').replaceAll('/', '-');
 }
 
 async function meView(redis: Redis, user: User | null, now: number) {
@@ -63,12 +75,25 @@ async function meView(redis: Redis, user: User | null, now: number) {
   };
 }
 
+/** The signed-in player, or null. A cookie from before "sign out everywhere" no longer counts. */
+async function currentUser(req: Request, deps: Deps, redis: Redis, now: number): Promise<{ user: User | null; hadCookie: boolean }> {
+  const session = sessionFromRequest(req, deps.env.secret!, now);
+  if (!session) return { user: null, hadCookie: false };
+  const user = await getUser(redis, session.sub);
+  return { user: user && user.sv === session.v ? user : null, hadCookie: true };
+}
+
 async function requireUser(req: Request, deps: Deps, redis: Redis, now: number): Promise<User> {
-  const sub = sessionFromRequest(req, deps.env.secret!, now);
-  if (!sub) throw new HttpError(401, 'signed_out');
-  const user = await getUser(redis, sub);
+  const { user } = await currentUser(req, deps, redis, now);
   if (!user) throw new HttpError(401, 'signed_out');
   return user;
+}
+
+function requireCron(req: Request, env: ServerEnv): void {
+  if (!env.cronSecret) throw new HttpError(503, 'cron_not_configured');
+  const got = Buffer.from(req.headers.get('authorization') ?? '');
+  const want = Buffer.from(`Bearer ${env.cronSecret}`);
+  if (got.length !== want.length || !timingSafeEqual(got, want)) throw new HttpError(401, 'unauthorized');
 }
 
 async function leaderboard(req: Request, redis: Redis, now: number): Promise<Response> {
@@ -111,10 +136,19 @@ async function route(req: Request, deps: Deps): Promise<Response> {
   if (r === 'leaderboard' && m === 'GET') return leaderboard(req, redis, now);
 
   if (r === 'me' && m === 'GET') {
-    const sub = sessionFromRequest(req, env.secret, now);
-    const user = sub ? await getUser(redis, sub) : null;
-    const headers: Record<string, string> = sub && !user ? { 'set-cookie': clearSessionCookie() } : {};
+    const { user, hadCookie } = await currentUser(req, deps, redis, now);
+    const headers: Record<string, string> = hadCookie && !user ? { 'set-cookie': clearSessionCookie() } : {};
     return json(await meView(redis, user, now), 200, headers);
+  }
+
+  if (r === 'me' && m === 'DELETE') {
+    const user = await requireUser(req, deps, redis, now);
+    const body = await readJson<{ confirm?: unknown }>(req);
+    if (body.confirm !== 'DELETE') throw new HttpError(400, 'confirm_required');
+    const today = serverDate(now);
+    const recent = Array.from({ length: DAILY_BOARD_DAYS + 1 }, (_, i) => addDays(today, -i));
+    await deleteUser(redis, user, recent);
+    return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie() });
   }
 
   if (r === 'me' && m === 'PATCH') {
@@ -138,10 +172,47 @@ async function route(req: Request, deps: Deps): Promise<Response> {
       fetchImpl: deps.fetchImpl,
     });
     const user = (await getUser(redis, sub)) ?? (await createUser(redis, sub, now));
-    return json(await meView(redis, user, now), 200, { 'set-cookie': sessionCookie(signSession(sub, env.secret, now)) });
+    return json(await meView(redis, user, now), 200, { 'set-cookie': sessionCookie(signSession(sub, env.secret, now, user.sv)) });
   }
 
   if (r === 'auth' && m === 'DELETE') return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie() });
+
+  if (r === 'auth-everywhere' && m === 'POST') {
+    const user = await requireUser(req, deps, redis, now);
+    await bumpSessionVersion(redis, user.sub);
+    return json({ ok: true }, 200, { 'set-cookie': clearSessionCookie() });
+  }
+
+  if (r === 'push-key' && m === 'GET') {
+    return json({ key: vapidKeys(env.secret).publicKey }, 200, { 'cache-control': 'public, max-age=3600' });
+  }
+
+  if (r === 'push-subscribe' && (m === 'POST' || m === 'DELETE')) {
+    const user = await requireUser(req, deps, redis, now);
+    const body = await readJson<{ subscription?: unknown; endpoint?: unknown }>(req);
+    if (m === 'POST') {
+      await rateLimit(redis, 'push', user.sub, 20, 3600);
+      await addSubscription(redis, user.sub, parseSubscription(body.subscription));
+    } else await removeSubscription(redis, user.sub, String(body.endpoint ?? ''));
+    return json({ ok: true });
+  }
+
+  if (r === 'report' && m === 'POST') {
+    await rateLimit(redis, 'report', clientIp(req), 20, 3600);
+    const body = await readJson<{ message?: unknown; where?: unknown }>(req, 8 * 1024);
+    await recordError(redis, { t: now, src: 'client', msg: String(body.message ?? '').slice(0, 300), where: String(body.where ?? '').slice(0, 200) });
+    return json({ ok: true });
+  }
+
+  if (r === 'health' && m === 'GET') {
+    requireCron(req, env);
+    return json(await health(redis, now));
+  }
+
+  if (r === 'cron-reminders' && m === 'GET') {
+    requireCron(req, env);
+    return json(await sendReminders(redis, env.secret, env.siteUrl, now, deps.fetchImpl));
+  }
 
   if (r === 'daily-start' && m === 'POST') {
     const user = await requireUser(req, deps, redis, now);
@@ -166,7 +237,10 @@ export function createHandler(deps: Deps): (req: Request) => Promise<Response> {
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.code, ...e.extra }, e.status);
       console.error('api error', e);
+      if (deps.redis) await recordError(deps.redis, { t: (deps.now ?? Date.now)(), src: 'server', msg: String((e as Error)?.stack ?? e), where: `${req.method} ${routeOf(req)}` });
       return json({ error: 'server_error' }, 500);
+    } finally {
+      await deps.afterRequest?.().catch(() => undefined);
     }
   };
 }

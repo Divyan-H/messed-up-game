@@ -11,6 +11,10 @@ export interface ServerEnv {
   googleIssuers: string[];
   /** Signs session cookies and derives the secret daily seed. */
   secret: string | null;
+  /** Bearer token for the reminder cron and the health check (Vercel sends it to cron jobs as CRON_SECRET). */
+  cronSecret: string | null;
+  /** Public site URL, used as the contact in Web Push (VAPID) requests. */
+  siteUrl: string;
   production: boolean;
 }
 
@@ -31,6 +35,8 @@ export function readEnv(env: Record<string, string | undefined> = process.env): 
     googleJwksUrl: (!production && env.TEST_GOOGLE_JWKS_URL) || GOOGLE_JWKS_URL,
     googleIssuers: !production && env.TEST_GOOGLE_ISSUER ? [env.TEST_GOOGLE_ISSUER] : GOOGLE_ISSUERS,
     secret: base ? createHash('sha256').update(`messed-up|${base}`).digest('hex') : null,
+    cronSecret: env.CRON_SECRET && env.CRON_SECRET.length >= 16 ? env.CRON_SECRET : null,
+    siteUrl: `https://${env.VERCEL_PROJECT_PRODUCTION_URL ?? 'messed-up-game.vercel.app'}`,
     production,
   };
 }
