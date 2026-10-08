@@ -16,7 +16,12 @@
     "playtest": "tsx scripts/playtest.ts",
     "snapshot": "tsx scripts/snapshot.ts",
     "foodsheet": "tsx scripts/foodsheet.ts",
-    "admin": "tsx scripts/admin.ts"
+    "admin": "tsx scripts/admin.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "icons": "tsx scripts/icons.ts",
+    "sharecard": "tsx scripts/sharecard.ts",
+    "screens": "tsx scripts/screens.ts"
   },
   "dependencies": {
     "@fontsource/press-start-2p": "^5.3.0"

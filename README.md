@@ -6,7 +6,10 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 
 **Play it:** https://messed-up-game.vercel.app
 
-![Title screen](docs/screens/title.png)
+<p>
+  <img src="docs/screens/title.png" alt="Title screen on a laptop" width="68%" />
+  <img src="docs/screens/title-mobile.png" alt="Title screen on a phone" width="26%" />
+</p>
 
 ## Contents
 
@@ -19,6 +22,7 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 - [Testing](#testing)
 - [Deployment and CI/CD](#deployment-and-cicd)
 - [Accounts and ranked play](#accounts-and-ranked-play)
+- [Monitoring and backups](#monitoring-and-backups)
 - [Known limitations](#known-limitations)
 - [Credits](#credits)
 
@@ -32,10 +36,15 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 - **Procedurally generated dining hall**: furniture-based layouts that are always connected and free of dead-end traps.
 - **Game AI**: A* chasers, an ambusher, a wanderer, a finite-state-machine boss, adaptive difficulty and a bot playtester. See [Game AI](#game-ai).
 - **Responsive, no-scroll UI**: every menu page is laid out in columns and scaled to fit the screen, so nothing scrolls. In-game, the maze and HUD rearrange for portrait and landscape.
-- **Touch, keyboard and swipe controls**, with a large on-screen d-pad whose position can be switched for one-handed play.
+- **Touch, keyboard and swipe controls**: an on-screen D-pad or a 4-way joystick (Settings), placed left, middle or right for one-handed play. The joystick takes any angle but snaps to the nearest of the four directions, ignores tiny movements and holds its direction near diagonals, so it never jitters between two.
+- **Phone-first game screen**: on portrait phones the HUD shrinks to two rows and the tips to one line, so the maze gets the height.
 - **First-run guided tour** in the game screen that points out the player, enemies, dishes, exit and HUD. It can be skipped, and replayed from the `?` button.
 - **Accessibility and comfort options**: high contrast, clear font, three text sizes, reduced motion, CRT effect toggle, vibration toggle, adjustable volume.
 - **Community leaderboard**: today, all-time and best streaks, with unique moderated nicknames, backed by Upstash Redis.
+- **Installable app**: add it to the home screen on Android, iPhone or desktop. It opens full screen, and Practice works offline.
+- **Streak reminders**: an optional evening notification when a streak is about to end.
+- **Share card**: a 1080x1080 pixel-art image of the result for WhatsApp, Instagram and stories, through the phone's share sheet.
+- **Account controls**: change nickname, sign out on every device, or delete the account and all its scores from Settings.
 - **Tiny footprint**: no image or audio files. Art is defined as text and drawn to canvas, sound is synthesised with WebAudio. The production JavaScript bundle is about 100 kB (37 kB gzipped).
 
 ## Tech stack
@@ -82,6 +91,9 @@ Practice works with `npm run dev` alone. Real Google sign-in works locally once 
 | `npm run snapshot` | Render PNG frames with the real renderer into `./snapshots` |
 | `npm run foodsheet` | Render a labelled contact sheet of every dish sprite |
 | `npm run admin -- <command>` | Moderate the live leaderboard (see [Moderation](#moderation)) |
+| `npm run backup` / `npm run restore -- <file>` | Export or restore the live database (see [Backups](#backups)) |
+| `npm run screens` | Regenerate the README screenshots with headless Edge or Chrome (after `npm run build`) |
+| `npm run icons` / `npm run sharecard` | Redraw the app icons / the example share card |
 
 ### URL flags (Practice only)
 
@@ -96,7 +108,7 @@ The ranked Daily Run ignores these.
 
 **Goal:** eat every dish to open the exit, then reach it. A day has three courses: Breakfast, Lunch and Dinner.
 
-**Controls:** arrow keys or WASD, swipe on the maze, or the on-screen pad. `P` or `Esc` pauses. You keep moving in your chosen direction until you turn.
+**Controls:** arrow keys or WASD, swipe on the maze, or the on-screen D-pad or joystick. `P` or `Esc` pauses. You keep moving in your chosen direction until you turn.
 
 | Thing | Rule |
 |---|---|
@@ -122,8 +134,18 @@ Each weekday gets harder (more and faster enemies, quicker releases). On top of 
 
 The multipliers were tuned with the bot so no level is the obvious choice for ranking: average scores are close across levels, and Hard has the highest ceiling. Everyone gets the same layout for the day; the level is part of the run configuration, so replays stay deterministic. In the Daily Run, enemy paths are only shown by the Hostel Hack perk.
 
-![Menu card](docs/screens/menu-card.png)
-![Gameplay](docs/screens/gameplay.png)
+<p>
+  <img src="docs/screens/menu-card.png" alt="Menu card before a run" width="49%" />
+  <img src="docs/screens/gameplay.png" alt="Gameplay" width="49%" />
+</p>
+<p>
+  <img src="docs/screens/gameplay-mobile.png" alt="Gameplay on a phone with the D-pad" width="24%" />
+  <img src="docs/screens/gameplay-joystick.png" alt="Gameplay on a phone with the joystick" width="24%" />
+  <img src="docs/screens/share-card.png" alt="Share card" width="48%" />
+</p>
+<p>
+  <img src="docs/screens/hall.png" alt="Hall of Fame" width="60%" />
+</p>
 
 ## Game AI
 
@@ -148,7 +170,10 @@ To get current balance numbers after any tuning change, run:
 npm run playtest 20
 ```
 
-![Enemy paths](docs/screens/ai-paths-overlay.png)
+<p>
+  <img src="docs/screens/ai-paths-overlay.png" alt="Enemy A* routes drawn over the maze" width="49%" />
+  <img src="docs/screens/ai-lab.png" alt="AI Lab: pathfinding benchmark" width="49%" />
+</p>
 
 ## Architecture
 
@@ -189,7 +214,7 @@ npm test
 
 The suite covers the seeded RNG and heap, pathfinding optimality and equivalence, maze and furniture guarantees (connectivity, no dead-end traps, clear aisles), enemy behaviour, run determinism and replay, streak rules, the difficulty model, profile sanitisation, layout and fit calculations, and sprite and menu coverage.
 
-The API tests (`tests/server.test.ts`) run the real handler against an in-memory Redis and RSA-signed test tokens: sign-in and every token rejection case, CSRF and rate limits, nickname rules, the one-attempt lock, replay-verified scoring of full and quit runs (played by the bot), forged scores, too-fast submissions, expiry, streaks across days, and leaderboard caching rules. The same suite runs in CI on every push and pull request.
+The API tests (`tests/server.test.ts`) run the real handler against an in-memory Redis and RSA-signed test tokens: sign-in and every token rejection case, CSRF and rate limits, nickname rules, the one-attempt lock, replay-verified scoring of full and quit runs (played by the bot), forged scores, too-fast submissions, expiry, streaks across days, leaderboard caching rules, signing out everywhere, account deletion, push-subscription validation, reminder targeting with a verified VAPID signature, error reports and the health check. `tests/backup.test.ts` round-trips a backup through an empty database and checks the encryption. The same suite runs in CI on every push and pull request.
 
 ## Deployment and CI/CD
 
@@ -220,13 +245,16 @@ Routing for the API, security headers (including a strict Content Security Polic
 
 ## Accounts and ranked play
 
-Practice needs nothing. The Daily Run, streaks and the leaderboard need two one-time setup steps.
+Practice needs nothing. The Daily Run, streaks, the leaderboard and reminders need a few one-time setup steps.
+
+![Settings, including the app and account controls](docs/screens/settings.png)
 
 ### Setup
 
 1. **Google sign-in.** In the Google Cloud console, create an OAuth client of type *Web application* and add the site's origins (for example `https://messed-up-game.vercel.app` and `http://localhost:5173`) as **Authorised JavaScript origins**. The client ID is in `src/services/authConfig.ts` (it is public by design); override it on the server with `GOOGLE_CLIENT_ID` if needed.
 2. **Database.** In the Vercel project, add the **Upstash Redis** integration from the Marketplace. It injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (`KV_REST_API_URL` / `KV_REST_API_TOKEN` also work). Pick the same region as the function: it runs in Mumbai (`bom1`, set in `vercel.json`). Redeploy afterwards.
-3. *Optional:* set `SESSION_SECRET` to a long random string. Without it, a key is derived from the Redis token.
+3. **Cron secret** (for streak reminders and the health check). In Vercel, add an environment variable `CRON_SECRET` with a long random value (at least 16 characters). Vercel sends it with its daily cron call; without it, reminders and `/api/health` stay off.
+4. *Optional:* set `SESSION_SECRET` to a long random string. Without it, a key is derived from the Redis token. (Changing it later signs everyone out and resets reminder subscriptions.)
 
 Until the database is connected the API answers `503`, and the game shows "Ranked play is offline" while Practice keeps working.
 
@@ -236,16 +264,25 @@ Until the database is connected the API answers `503`, and the game shows "Ranke
 |---|---|
 | `GET /api/me` | Current player (or none), server time and today's status |
 | `PATCH /api/me` | Change nickname (unique, moderated, rate-limited) |
+| `DELETE /api/me` | Delete the account, nickname and every score (needs `{"confirm":"DELETE"}`) |
 | `POST /api/auth` / `DELETE /api/auth` | Sign in with a Google ID token / sign out |
+| `POST /api/auth/everywhere` | Sign out on every device |
 | `POST /api/daily/start` | Use today's attempt and receive the day's maze seed |
 | `POST /api/daily/finish` | Submit the run's inputs; the server replays them and records the score |
 | `GET /api/leaderboard?board=daily\|alltime\|streak` | Top 20, cached at the CDN for 30 seconds |
+| `GET /api/push/key`, `POST` / `DELETE /api/push/subscribe` | Streak reminders on this device |
+| `POST /api/report` | Browser error report (rate-limited) |
+| `GET /api/health` | Monitoring summary (needs `Authorization: Bearer <CRON_SECRET>`) |
+| `GET /api/cron/reminders` | Sends the day's reminders; called by Vercel Cron at 20:00 IST |
 
 - The Google ID token's signature, issuer, audience and expiry are checked against Google's published keys. Only Google's numeric account ID is stored, never email, name or photo.
 - Sessions are a signed, HttpOnly, Secure, SameSite cookie; state-changing requests must be same-origin JSON (CSRF protection).
 - One attempt per account per day is enforced with a Redis lock, using the server's date. The daily seed is an HMAC of the date, so future mazes cannot be computed in advance.
 - A submitted run is rejected if it claims more play time than has actually passed since it started, and it is scored only by replaying its inputs.
 - Leaving mid-run submits what was played (and retries on the next visit if the network failed), so a refresh never silently loses the attempt.
+- Each session cookie carries the account's session version; **Sign out everywhere** bumps it, so every earlier cookie stops working at once.
+- Deleting an account removes its profile, nickname claim, leaderboard entries and reminder subscriptions. Today's attempt lock is kept, so deleting and re-creating an account does not grant a second Daily Run.
+- Streak reminders use Web Push without a payload, authorised by a VAPID key derived from the server secret, so no extra keys or libraries are needed. The cron only notifies players who have a streak to lose and have not played; when a push arrives, the service worker asks `/api/me` and writes the notification. Push endpoints must belong to a known push service, and dead subscriptions are removed. On iPhone, reminders need the game added to the Home Screen first (an iOS rule).
 
 ### Moderation
 
@@ -263,12 +300,35 @@ npm run admin -- ban <nickname>
 
 Gameplay runs entirely in the browser, so the number of simultaneous players is not limited by the server. Each ranked player costs roughly 10-15 Redis commands per day; Upstash's free tier (500,000 commands a month) therefore covers on the order of 1,000 daily ranked players, and Vercel's Hobby plan (1,000,000 requests and function invocations a month) about 10,000. Beyond that, Upstash pay-as-you-go costs about $0.20 per 100,000 commands. Hobby is for non-commercial use.
 
+## Monitoring and backups
+
+### Error alerts
+
+Server errors and browser errors (reported by players' browsers, production only, a few per visit) are kept in a capped Redis list. The server also counts its own Redis commands and flushes the count every ten minutes, which gives an estimate of the month's usage against Upstash's free tier.
+
+`.github/workflows/health.yml` runs every morning: it calls `/api/health` and, if there were errors in the last 24 hours or the month is projected past 80% of the free tier (or the API is down), opens or updates a GitHub issue titled *Health alert*. GitHub emails you about it. It needs one repository secret, `CRON_SECRET`, with the same value as in Vercel. The command count is an estimate; Upstash's console has the exact figure.
+
+### Backups
+
+`npm run backup` exports every account, nickname, leaderboard, reminder subscription and today's locks to `backups/` (git-ignored). With `BACKUP_PASSPHRASE` set, the file is encrypted with scrypt and AES-256-GCM.
+
+`.github/workflows/backup.yml` does this every Sunday and keeps the encrypted file as a workflow artifact for 90 days. Artifacts of a public repository are not private, so the workflow refuses to run without a passphrase. It needs three repository secrets: `KV_REST_API_URL` and `KV_REST_API_TOKEN` (copy them from the Vercel project's environment variables) and `BACKUP_PASSPHRASE` (keep a copy somewhere safe; it cannot be recovered).
+
+To restore, download the artifact, then:
+
+```bash
+BACKUP_PASSPHRASE=... npm run restore -- backups/messed-up-<date>.json.enc        # dry run
+BACKUP_PASSPHRASE=... npm run restore -- backups/messed-up-<date>.json.enc --yes  # write
+```
+
+Each key in the backup replaces the live one; keys created after the backup are left alone.
+
 ## Known limitations
 
 - **One person, several Google accounts.** Each account gets its own Daily attempt. That takes real effort, but it is not prevented.
 - **Bots playing in real time.** A custom program that plays through the browser at real speed produces valid input logs. The built-in autopilot is disabled for ranked runs, and runs cannot be submitted faster than real time.
-- **Sessions are stateless.** Signing out clears the cookie; a stolen cookie would stay valid until it expires (30 days) unless `SESSION_SECRET` is changed, which signs everyone out.
-- **Data deletion is manual** (see `public/privacy.html`).
+- **Reminders are best effort.** Vercel's Hobby cron runs once a day within the hour, and phones may delay or drop notifications (battery savers, iOS needs the Home Screen app).
+- **Usage numbers are estimates.** The health check's command count misses the last few minutes of any server instance that shuts down before flushing.
 - Audio is synthesised and has not been covered by automated checks.
 
 ## Credits

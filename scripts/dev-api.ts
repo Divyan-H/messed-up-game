@@ -7,6 +7,8 @@
  *   Google Cloud console. For automated testing it also accepts tokens from POST /__dev/sign-in
  *   (signed by a throwaway local key). None of this file is deployed.
  *
+ * POST /__dev/seed {me?} fills the in-memory database with demo players (used by `npm run screens`).
+ *
  * `npm run serve:prod` is a pre-deploy check: it serves the production build (dist/) on port 5173 with the
  * security headers from vercel.json, and answers /api with the real deployable bundle (api/game.js) talking
  * to an in-memory Upstash over HTTP. Sign in there with POST /__dev/sign-in (Google sign-in is not wired up).
@@ -19,6 +21,8 @@ import { createHandler } from '../server/app';
 import { FakeUpstash } from '../server/dev/fakeUpstash';
 import { GOOGLE_ISSUERS, readEnv } from '../server/env';
 import { UpstashRedis } from '../server/redis';
+import { K } from '../server/store';
+import { addDays, istDateKey } from '../src/core/clock';
 
 const PROD = process.argv.includes('--prod');
 const PORT = PROD ? 5173 : 8787;
@@ -30,6 +34,35 @@ const devJwk = { ...publicKey.export({ format: 'jwk' }), kid: DEV_KID, alg: 'RS2
 
 const base = readEnv(process.env);
 const fake = base.redisUrl ? null : new FakeUpstash();
+/** The in-memory database /__dev/seed writes to (none when talking to real Upstash). */
+let seedTarget: FakeUpstash | null = fake;
+
+/** Demo leaderboard for screenshots: eight players today, plus a 6-day streak and history for `me`. */
+function seedDemo(db: FakeUpstash, me?: string): void {
+  const now = Date.now();
+  const today = istDateKey(now);
+  const players: Array<[string, string, number, number]> = [
+    ['demo-1', 'SpicyIdli101', 5120, 12], ['demo-2', 'MessKing', 4870, 9], ['demo-3', 'CrispyDosa77', 4410, 4],
+    ['demo-4', 'LazyUpma393', 3980, 15], ['demo-5', 'ZestyKurma636', 3550, 2], ['demo-6', 'HungryPoha615', 3120, 7],
+    ['demo-7', 'SlyLassi208', 2760, 1], ['demo-8', 'TangyRasam54', 2190, 3],
+  ];
+  for (const [sub, name, score, streak] of players) {
+    const st = { current: streak, best: streak, freezes: Math.min(2, Math.floor(streak / 7)), lastPlayed: today, usedFreezeOn: null };
+    db.exec(['HSET', K.user(sub), 'name', name, 'created', now, 'streak', JSON.stringify(st), 'best', score, 'days', JSON.stringify([{ d: today, s: score }])]);
+    db.exec(['HSET', K.nick, sub, name]);
+    db.exec(['HSET', K.names, name.toLowerCase(), sub]);
+    db.exec(['ZADD', K.daily(today), score, sub]);
+    db.exec(['ZADD', K.alltime, score + 420, sub]);
+    db.exec(['ZADD', K.streak, streak, sub]);
+  }
+  if (me) {
+    const days = Array.from({ length: 6 }, (_, i) => ({ d: addDays(today, i - 6), s: 2400 + i * 330 }));
+    const st = { current: 6, best: 6, freezes: 0, lastPlayed: addDays(today, -1), usedFreezeOn: null };
+    db.exec(['HSET', K.user(me), 'streak', JSON.stringify(st), 'best', 4380, 'days', JSON.stringify(days)]);
+    db.exec(['ZADD', K.alltime, 4380, me]);
+    db.exec(['ZADD', K.streak, 6, me]);
+  }
+}
 const env = {
   ...base,
   secret: base.secret ?? 'local-dev-secret',
@@ -51,6 +84,7 @@ let api: (req: Request) => Promise<Response> = createHandler({ env, redis, fetch
 if (PROD) {
   // the bundle reads its configuration from the environment, exactly as on Vercel
   const upstash = new FakeUpstash();
+  seedTarget = upstash;
   await new Promise<void>((done) => createServer(async (req, res) => {
     const out = await upstash.fetch(`http://fake${req.url}`, { method: 'POST', body: (await readBody(req)).toString() });
     res.setHeader('content-type', 'application/json');
@@ -97,6 +131,17 @@ function serveStatic(path: string, res: ServerResponse): void {
 createServer(async (req, res) => {
   try {
     const path = req.url ?? '/';
+    if (req.method === 'POST' && path === '/__dev/seed') {
+      const { me } = JSON.parse((await readBody(req)).toString() || '{}') as { me?: string };
+      if (!seedTarget) {
+        res.writeHead(409).end('seeding only works with the in-memory database');
+        return;
+      }
+      seedDemo(seedTarget, me);
+      res.setHeader('content-type', 'application/json');
+      res.end('{"ok":true}');
+      return;
+    }
     if (path === '/__dev/jwks') {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ keys: [devJwk] }));
