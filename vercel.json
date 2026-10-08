@@ -22,9 +22,48 @@
     {
       "source": "/api/leaderboard",
       "destination": "/api/game?route=leaderboard"
+    },
+    {
+      "source": "/api/auth/everywhere",
+      "destination": "/api/game?route=auth-everywhere"
+    },
+    {
+      "source": "/api/push/key",
+      "destination": "/api/game?route=push-key"
+    },
+    {
+      "source": "/api/push/subscribe",
+      "destination": "/api/game?route=push-subscribe"
+    },
+    {
+      "source": "/api/report",
+      "destination": "/api/game?route=report"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/game?route=health"
+    },
+    {
+      "source": "/api/cron/reminders",
+      "destination": "/api/game?route=cron-reminders"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "30 14 * * *"
     }
   ],
   "headers": [
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    },
     {
       "source": "/assets/(.*)",
       "headers": [
@@ -55,7 +94,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data:; font-src 'self'; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          "value": "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data:; font-src 'self'; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         }
       ]
     }
