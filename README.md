@@ -296,6 +296,10 @@ npm run admin -- ban <nickname>
 
 `ban` removes the player from every board and blocks ranked play; `unban` reverses it.
 
+### Analytics and speed
+
+The game loads Vercel Web Analytics (page views, visitors) and Speed Insights (real-user load speed: LCP, INP, CLS) from `src/ui/analytics.ts`, production only, with no cookies and no personal data. Turn each on once in the Vercel dashboard (project, **Analytics** tab then **Enable**, and **Speed Insights** tab then **Enable**). Hobby includes 50,000 analytics events and 10,000 Speed Insights data points a month. The dashboard also has built-in **Observability** (function invocations, errors, durations), **Logs** (runtime logs, kept 1 hour on Hobby) and **Firewall**, which need no code.
+
 ### Capacity on the free tiers
 
 Gameplay runs entirely in the browser, so the number of simultaneous players is not limited by the server. Each ranked player costs roughly 10-15 Redis commands per day; Upstash's free tier (500,000 commands a month) therefore covers on the order of 1,000 daily ranked players, and Vercel's Hobby plan (1,000,000 requests and function invocations a month) about 10,000. Beyond that, Upstash pay-as-you-go costs about $0.20 per 100,000 commands. Hobby is for non-commercial use.

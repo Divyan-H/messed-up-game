@@ -3,9 +3,11 @@ import './style.css';
 import { sfx } from './audio/sfx';
 import { App } from './ui/app';
 import { h } from './ui/dom';
+import { initAnalytics } from './ui/analytics';
 import { initErrorReporting } from './ui/errorReporter';
 import { initInstall, registerServiceWorker } from './ui/install';
 
+initAnalytics();
 initErrorReporting();
 initInstall();
 registerServiceWorker();
