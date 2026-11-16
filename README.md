@@ -13,11 +13,11 @@ A retro pixel-art maze game about a hungry hostel student. Eat the day's mess me
 
 ### Launch video
 
-20 seconds, 1920x1080, 30 fps. Every frame is the game's own renderer and simulation.
+20 seconds, 1920x1080, 30 fps (the preview below is a lighter animated copy). Every frame is the game's own renderer and simulation.
 
-<video src="https://github.com/Divyan-H/messed-up-game/raw/main/docs/video/messed-up-launch.mp4" poster="https://github.com/Divyan-H/messed-up-game/raw/main/docs/video/messed-up-launch.jpg" controls muted width="100%"></video>
+<img src="docs/video/messed-up-launch.gif" alt="MESSED UP launch video" width="100%" />
 
-[If the video does not play here, open it directly.](docs/video/messed-up-launch.mp4)
+[Watch the full-quality video with sound (mp4).](docs/video/messed-up-launch.mp4)
 
 ## Contents
 
